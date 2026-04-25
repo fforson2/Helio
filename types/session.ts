@@ -6,6 +6,8 @@ export interface ChatMessage {
   content: string;
   timestamp: string;
   propertyContext?: string;
+  imageUrl?: string;
+  imageCaption?: string;
   metadata?: Record<string, unknown>;
 }
 
