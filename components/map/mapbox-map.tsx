@@ -71,7 +71,7 @@ function ensure3DLayers(map: any) {
           type: "fill-extrusion",
           minzoom: 13,
           paint: {
-            "fill-extrusion-color": "oklch(0.22 0 0)",
+            "fill-extrusion-color": "#2a2a2a",
             "fill-extrusion-opacity": 0.85,
             "fill-extrusion-height": ["interpolate", ["linear"], ["zoom"], 13, 0, 13.5, ["get", "height"]],
             "fill-extrusion-base": ["interpolate", ["linear"], ["zoom"], 13, 0, 13.5, ["get", "min_height"]],
