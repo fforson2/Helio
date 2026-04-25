@@ -5,7 +5,7 @@ import { usePropertyStore, useUserStore } from "@/lib/store";
 import { PropertyCard } from "@/components/property/property-card";
 import { PropertyDetailPanel } from "@/components/property/property-detail-panel";
 import { MapFilters } from "@/components/map/map-filters";
-import { MapboxMap } from "@/components/map/mapbox-map";
+import { GoogleMap } from "@/components/map/google-map";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -235,7 +235,7 @@ export function MapSearchView({ listOnly = false }: MapSearchViewProps) {
 
       {!listOnly && (
         <div className="flex-1 relative">
-          <MapboxMap properties={properties} selectedId={selectedPropertyId} onSelectProperty={selectProperty} />
+          <GoogleMap properties={properties} selectedId={selectedPropertyId} onSelectProperty={selectProperty} />
         </div>
       )}
 

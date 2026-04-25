@@ -4,7 +4,8 @@ const nextConfig: NextConfig = {
   images: {
     remotePatterns: [
       { hostname: "images.unsplash.com" },
-      { hostname: "api.mapbox.com" },
+      { hostname: "maps.googleapis.com" },
+      { hostname: "maps.gstatic.com" },
     ],
   },
   serverExternalPackages: ["jspdf", "better-sqlite3"],
