@@ -18,6 +18,8 @@ interface MapSearchViewProps {
   listOnly?: boolean;
 }
 
+const MAX_MAP_MARKERS = 50;
+
 function hasActiveFilters(filters: ReturnType<typeof usePropertyStore.getState>["filters"]) {
   return Boolean(
     filters.minPrice ||
@@ -54,6 +56,7 @@ export function MapSearchView({ listOnly = false }: MapSearchViewProps) {
 
   const selectedProperty = selectedPropertyId ? propertyMap[selectedPropertyId] ?? null : null;
   const activeFilters = hasActiveFilters(filters);
+  const mapProperties = useMemo(() => properties.slice(0, MAX_MAP_MARKERS), [properties]);
 
   useEffect(() => {
     setPrompt(searchQuery);
@@ -141,7 +144,7 @@ export function MapSearchView({ listOnly = false }: MapSearchViewProps) {
             <div className="flex-1 space-y-1">
               <span className="text-sm font-medium">{properties.length} properties</span>
               <div className="text-xs text-muted-foreground line-clamp-2">
-                {searchSummary || "Search properties by prompt or filters."}
+                {searchSummary || "Showing a small California starter set. Search a city, zip code, or home type to load more."}
               </div>
             </div>
             <Button
@@ -180,7 +183,7 @@ export function MapSearchView({ listOnly = false }: MapSearchViewProps) {
                   runPromptSearch();
                 }
               }}
-              placeholder="Describe the home you want..."
+              placeholder="Search California by city, zip code, neighborhood, or home type..."
               className="h-9"
             />
             <Button onClick={runPromptSearch} disabled={isSearching || !prompt.trim()} className="gap-2">
@@ -235,7 +238,16 @@ export function MapSearchView({ listOnly = false }: MapSearchViewProps) {
 
       {!listOnly && (
         <div className="flex-1 relative">
-          <GoogleMap properties={properties} selectedId={selectedPropertyId} onSelectProperty={selectProperty} />
+          <GoogleMap
+            properties={mapProperties}
+            selectedId={selectedPropertyId}
+            onSelectProperty={selectProperty}
+          />
+          {properties.length > mapProperties.length && (
+            <div className="absolute bottom-3 left-3 z-10 rounded-lg border border-border bg-card/80 px-3 py-1.5 text-xs text-muted-foreground backdrop-blur-sm">
+              Map showing top {mapProperties.length} listings for performance
+            </div>
+          )}
         </div>
       )}
 

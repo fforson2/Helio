@@ -110,6 +110,5 @@ types/
 - [ ] Supabase persistence for saved properties and sessions
 - [ ] LiveKit voice assistant
 - [ ] 3D property environment viewer (Three.js)
-- [ ] Knowledge graph visualization
 - [ ] Offer letter / document generation
 - [ ] Agent portal + shared session rooms

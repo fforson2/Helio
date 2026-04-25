@@ -1,16 +1,15 @@
 "use client";
 
 import { useEffect } from "react";
-import { usePropertyStore, useUserStore } from "@/lib/store";
+import { usePropertyStore } from "@/lib/store";
 import { DashboardNav } from "@/components/layout/dashboard-nav";
-import { preferencesToFilters, searchListings } from "@/lib/search-client";
+import { searchListings } from "@/lib/search-client";
 
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const { profile } = useUserStore();
   const {
     properties,
     setSearchResults,
@@ -22,15 +21,14 @@ export default function DashboardLayout({
     if (properties.length > 0) return;
 
     let cancelled = false;
-    const filters = preferencesToFilters(profile?.preferences);
-    const query = profile?.preferences?.targetNeighborhoods?.length
-      ? `Homes matching ${profile.preferences.targetNeighborhoods.join(", ")}`
-      : "All available homes";
+    const filters = {};
+    const query = "California homes";
+    const summary = "Active California listings";
 
     setSearching(true);
     searchListings({
       query,
-      summary: query,
+      summary,
       filters,
     })
       .then((response) => {
@@ -40,11 +38,12 @@ export default function DashboardLayout({
           session: response.session,
           query,
           filters,
+          summary,
         });
       })
       .catch(() => {
         if (cancelled) return;
-        setSearchError("Could not load the property search session.");
+        setSearchError("Could not load California listings.");
       })
       .finally(() => {
         if (!cancelled) setSearching(false);
@@ -53,7 +52,7 @@ export default function DashboardLayout({
     return () => {
       cancelled = true;
     };
-  }, [profile, properties.length, setSearchError, setSearchResults, setSearching]);
+  }, [properties.length, setSearchError, setSearchResults, setSearching]);
 
   return (
     <div className="min-h-screen bg-background flex flex-col">

@@ -1,0 +1,166 @@
+.nh
+.TH "GH-SKILL-INSTALL" "1" "Apr 2026" "GitHub CLI 2.90.0" "GitHub CLI manual"
+
+.SH NAME
+gh-skill-install - Install agent skills from a GitHub repository (preview)
+
+
+.SH SYNOPSIS
+\fBgh skill install <repository> [<skill[@version]>] [flags]\fR
+
+
+.SH DESCRIPTION
+Install agent skills from a GitHub repository or local directory into
+your local environment. Skills are placed in a host-specific directory
+at either project scope (inside the current git repository) or user
+scope (in your home directory, available everywhere). Supported hosts
+and their storage directories are (project, user):
+.IP \(bu 2
+GitHub Copilot (\fB\&.agents/skills\fR, \fB~/.copilot/skills\fR)
+.IP \(bu 2
+Claude Code    (\fB\&.claude/skills\fR, \fB~/.claude/skills\fR)
+.IP \(bu 2
+Cursor         (\fB\&.agents/skills\fR, \fB~/.cursor/skills\fR)
+.IP \(bu 2
+Codex          (\fB\&.agents/skills\fR, \fB~/.codex/skills\fR)
+.IP \(bu 2
+Gemini CLI     (\fB\&.agents/skills\fR, \fB~/.gemini/skills\fR)
+.IP \(bu 2
+Antigravity    (\fB\&.agents/skills\fR, \fB~/.gemini/antigravity/skills\fR)
+
+.PP
+Use \fB--agent\fR and \fB--scope\fR to control placement, or \fB--dir\fR for a
+custom directory. The default scope is \fBproject\fR, and the default
+agent is \fBgithub-copilot\fR (when running non-interactively).
+
+.PP
+At project scope, GitHub Copilot, Cursor, Codex, Gemini CLI, and
+Antigravity all use the shared \fB\&.agents/skills\fR directory. If you
+select multiple hosts that resolve to the same destination, each skill is
+installed there only once.
+
+.PP
+The first argument is a GitHub repository in \fBOWNER/REPO\fR format.
+Use \fB--from-local\fR to install from a local directory instead.
+Local skills are auto-discovered using the same conventions as remote
+repositories, and files are copied (not symlinked) with local-path
+tracking metadata injected into frontmatter.
+
+.PP
+Skills are discovered automatically using the \fBskills/*/SKILL.md\fR convention
+defined by the Agent Skills specification. For more information on the specification,
+see: https://agentskills.io/specification
+
+.PP
+The skill argument can be a name, a namespaced name (\fBauthor/skill\fR),
+or an exact path within the repository (\fBskills/author/skill\fR or
+\fBskills/author/skill/SKILL.md\fR).
+
+.PP
+Performance tip: when installing from a large repository with many
+skills, providing an exact path instead of a skill name avoids a
+full tree traversal of the repository, making the install significantly faster.
+
+.PP
+When a skill name is provided without a version, the CLI resolves the
+version in this order:
+.IP "  1." 5
+Latest tagged release in the repository
+.IP "  2." 5
+Default branch HEAD
+
+.PP
+To pin to a specific version, either append \fB@VERSION\fR to the skill
+name or use the \fB--pin\fR flag. The version is resolved as a git tag or commit SHA.
+
+.PP
+Installed skills have source tracking metadata injected into their
+frontmatter. This metadata identifies the source repository and
+enables \fBgh skill update\fR to detect changes.
+
+.PP
+When run interactively, the command prompts for any missing arguments.
+When run non-interactively, \fBrepository\fR and a skill name are
+required.
+
+
+.SH OPTIONS
+.TP
+\fB--agent\fR \fB<string>\fR
+Target agent: {github-copilot|claude-code|cursor|codex|gemini|antigravity}
+
+.TP
+\fB--dir\fR \fB<string>\fR
+Install to a custom directory (overrides --agent and --scope)
+
+.TP
+\fB-f\fR, \fB--force\fR
+Overwrite existing skills without prompting
+
+.TP
+\fB--from-local\fR
+Treat the argument as a local directory path instead of a repository
+
+.TP
+\fB--pin\fR \fB<string>\fR
+Pin to a specific git tag or commit SHA
+
+.TP
+\fB--scope\fR \fB<string> (default "project")\fR
+Installation scope: {project|user}
+
+
+.SH ALIASES
+gh skill add, gh skills add
+
+
+.SH EXIT CODES
+0: Successful execution
+
+.PP
+1: Error
+
+.PP
+2: Command canceled
+
+.PP
+4: Authentication required
+
+.PP
+NOTE: Specific commands may have additional exit codes. Refer to the command's help for more information.
+
+
+.SH EXAMPLE
+.EX
+# Interactive: choose repo, skill, and agent
+$ gh skill install
+
+# Choose a skill from the repo interactively
+$ gh skill install github/awesome-copilot
+
+# Install a specific skill
+$ gh skill install github/awesome-copilot git-commit
+
+# Install a specific version
+$ gh skill install github/awesome-copilot git-commit@v1.2.0
+
+# Install from a large namespaced repo by path (efficient, skips full discovery)
+$ gh skill install github/awesome-copilot skills/monalisa/code-review
+
+# Install from a local directory
+$ gh skill install ./my-skills-repo --from-local
+
+# Install a specific local skill
+$ gh skill install ./my-skills-repo git-commit --from-local
+
+# Install for Claude Code at user scope
+$ gh skill install github/awesome-copilot git-commit --agent claude-code --scope user
+
+# Pin to a specific git ref
+$ gh skill install github/awesome-copilot git-commit --pin v2.0.0
+
+.EE
+
+
+.SH SEE ALSO
+\fBgh-skill(1)\fR

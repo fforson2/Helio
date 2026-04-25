@@ -12,7 +12,7 @@ interface SearchRequest {
 
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as SearchRequest;
-  const response = searchListings({
+  const response = await searchListings({
     query: body.query,
     summary: body.summary,
     filters: body.filters ?? {},
