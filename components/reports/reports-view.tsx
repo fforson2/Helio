@@ -1,43 +1,305 @@
 "use client";
 
-import { useState } from "react";
-import { usePropertyStore, useUserStore } from "@/lib/store";
+import { useState, useRef, useEffect } from "react";
+import { usePropertyStore, useUserStore, useChatStore } from "@/lib/store";
 import { Property } from "@/types/property";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
-import { formatFullPrice, formatBeds, formatBaths, formatSqft, formatDaysOnMarket } from "@/lib/format";
-import { getDealScoreColor, getDealScoreBg } from "@/lib/deal-score";
+import { formatPrice } from "@/lib/format";
 import {
-  FileText,
-  Download,
-  Loader2,
-  CheckCircle2,
   Home,
-  Sparkles,
-  Map,
+  Send,
+  Loader2,
+  Bot,
+  User,
+  Download,
+  CheckCircle2,
+  Bookmark,
+  BookmarkCheck,
+  Mail,
+  X,
 } from "lucide-react";
-import { useUIStore } from "@/lib/store";
 import { toast } from "sonner";
 
-export function ReportsView() {
-  const { properties, propertyMap, savedProperties, activeSearchSessionId } = usePropertyStore();
-  const { profile } = useUserStore();
-  const { setActiveTab } = useUIStore();
-  const [generating, setGenerating] = useState<string | null>(null);
-  const [generated, setGenerated] = useState<Set<string>>(new Set());
+type QuickActionId = "email" | "mrkt" | "rprt" | "schm";
 
-  const savedProps = savedProperties
-    .map((s) => propertyMap[s.propertyId] ?? properties.find((p) => p.id === s.propertyId))
+interface QuickAction {
+  id: QuickActionId;
+  tag: string;
+  label: string;
+  prompt: string;
+}
+
+const QUICK_ACTIONS: QuickAction[] = [
+  {
+    id: "email",
+    tag: "EMAIL",
+    label: "Email me a property summary",
+    prompt: "",
+  },
+  {
+    id: "mrkt",
+    tag: "MRKT",
+    label: "Market analysis for my watchlist",
+    prompt:
+      "Give me a thorough market analysis comparing every property in my watchlist. Cover pricing vs. AVM, neighborhood trends, days-on-market signals, and risk factors. End with a final ranking.",
+  },
+  {
+    id: "rprt",
+    tag: "RPRT",
+    label: "Compare top search results",
+    prompt:
+      "Compare the top 3 properties in my search by deal score. Surface the clearest differences (price-per-sqft, school rating, walkability, risk, condition, momentum) and tell me which one is the best buy and why.",
+  },
+  {
+    id: "schm",
+    tag: "SCHM",
+    label: "Generate floor plan schematic",
+    prompt: "",
+  },
+];
+
+export function ReportsView() {
+  const {
+    properties,
+    propertyMap,
+    activeSearchSessionId,
+    savedProperties,
+    saveProperty,
+    unsaveProperty,
+    isPropertySaved,
+  } = usePropertyStore();
+  const { profile } = useUserStore();
+  const { messages, isLoading, addMessage, setLoading, clearMessages } =
+    useChatStore();
+
+  const [activeTab, setActiveTab] = useState<"properties" | "watchlist">(
+    "properties"
+  );
+  const [input, setInput] = useState("");
+  const [selectedProperty, setSelectedProperty] = useState<Property | null>(
+    null
+  );
+  const [generating, setGenerating] = useState(false);
+  const [generated, setGenerated] = useState<Set<string>>(new Set());
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Reset to default welcome state every time the Report tab is opened.
+  useEffect(() => {
+    clearMessages();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, isLoading]);
+
+  // Saved listings may live outside the current search results, so fall
+  // back to the persisted propertyMap for lookups.
+  const savedPropsList = savedProperties
+    .map(
+      (s) =>
+        propertyMap[s.propertyId] ??
+        properties.find((p) => p.id === s.propertyId)
+    )
     .filter(Boolean) as Property[];
 
-  const reportableProps = savedProps.length > 0 ? savedProps : properties.slice(0, 4);
+  const displayProperties =
+    activeTab === "watchlist" ? savedPropsList : properties;
+
+  function downloadImage(url: string, caption: string) {
+    const filename = caption
+      .replace(/[^a-zA-Z0-9\s-]/g, "")
+      .replace(/\s+/g, "-")
+      .toLowerCase()
+      .slice(0, 60);
+
+    if (url.startsWith("data:")) {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${filename}.png`;
+      a.click();
+      return;
+    }
+
+    fetch(url)
+      .then((res) => res.blob())
+      .then((blob) => {
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = blobUrl;
+        a.download = `${filename}.png`;
+        a.click();
+        URL.revokeObjectURL(blobUrl);
+      })
+      .catch(() => {
+        window.open(url, "_blank");
+      });
+  }
+
+  /** Pick which properties go into a "summary" action (email, etc.). */
+  function getSummaryScope(): Property[] {
+    if (selectedProperty) return [selectedProperty];
+    if (savedPropsList.length > 0) return savedPropsList;
+    return [...properties]
+      .sort((a, b) => (b.dealScore?.total ?? 0) - (a.dealScore?.total ?? 0))
+      .slice(0, 3);
+  }
+
+  /** Pick the property used for floor-plan generation. */
+  function getSchematicProperty(): Property | null {
+    if (selectedProperty) return selectedProperty;
+    if (savedPropsList.length > 0) return savedPropsList[0];
+    const top = [...properties].sort(
+      (a, b) => (b.dealScore?.total ?? 0) - (a.dealScore?.total ?? 0)
+    )[0];
+    return top ?? null;
+  }
+
+  async function sendMessage(content?: string) {
+    const text = (content ?? input).trim();
+    if (!text || isLoading) return;
+    setInput("");
+
+    addMessage({ role: "user", content: text });
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [...messages, { role: "user", content: text }],
+          context: {
+            searchSessionId: activeSearchSessionId,
+            selectedPropertyId: selectedProperty?.id ?? null,
+            savedPropertyIds: savedProperties.map((s) => s.propertyId),
+            userPreferences: profile?.preferences,
+            userName: profile?.name,
+          },
+        }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      const data = await res.json();
+      addMessage({ role: "assistant", content: data.message });
+    } catch {
+      addMessage({
+        role: "assistant",
+        content:
+          "Having trouble connecting. Check your API key in .env.local and try again.",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleQuickAction(action: QuickAction) {
+    if (action.id === "email") {
+      setEmailModalOpen(true);
+      return;
+    }
+    if (action.id === "schm") {
+      await generateSchematic();
+      return;
+    }
+    sendMessage(action.prompt);
+  }
+
+  async function generateSchematic() {
+    const property = getSchematicProperty();
+    if (!property) {
+      toast.error("No property available to render");
+      return;
+    }
+    addMessage({
+      role: "user",
+      content: `Generate a floor plan schematic for ${property.location.address}.`,
+    });
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/schematic", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ property }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error ?? "Failed to generate schematic");
+      }
+      addMessage({
+        role: "assistant",
+        content: data.caption ?? "Floor plan generated.",
+        imageUrl: data.imageUrl,
+        imageCaption: data.caption,
+      });
+    } catch (err) {
+      addMessage({
+        role: "assistant",
+        content: `Couldn't generate the floor plan. ${
+          err instanceof Error ? err.message : "Please try again."
+        }`,
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function sendEmail(toEmail: string) {
+    const scope = getSummaryScope();
+    if (scope.length === 0) {
+      toast.error("No properties to summarize");
+      return;
+    }
+    setEmailModalOpen(false);
+
+    const label =
+      scope.length === 1
+        ? scope[0].location.address
+        : `${scope.length} watchlist properties`;
+    addMessage({
+      role: "user",
+      content: `Email me a property summary for ${label} (${toEmail}).`,
+    });
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: toEmail,
+          properties: scope,
+          userProfile: profile,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error ?? "Email failed");
+      }
+      toast.success("Email sent", { description: toEmail });
+      addMessage({
+        role: "assistant",
+        content: `Sent your property summary to **${toEmail}**. Subject: "${data.subject}". Check your inbox in a minute or two.`,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Email failed";
+      toast.error("Email failed", { description: msg });
+      addMessage({
+        role: "assistant",
+        content: `I couldn't send the email. ${msg}`,
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function generateReport(property: Property) {
-    setGenerating(property.id);
+    setGenerating(true);
     try {
       const res = await fetch("/api/report", {
         method: "POST",
@@ -48,17 +310,16 @@ export function ReportsView() {
           userProfile: profile,
         }),
       });
-
-      if (!res.ok) throw new Error("Failed to generate report");
-
+      if (!res.ok) throw new Error("Failed");
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `helio-report-${property.location.address.replace(/\s+/g, "-").toLowerCase()}.html`;
+      a.download = `helio-report-${property.location.address
+        .replace(/\s+/g, "-")
+        .toLowerCase()}.html`;
       a.click();
       URL.revokeObjectURL(url);
-
       setGenerated((prev) => new Set([...prev, property.id]));
       toast.success("Report downloaded!", {
         description: property.location.address,
@@ -67,191 +328,507 @@ export function ReportsView() {
       toast.error("Could not generate report", {
         description: "Add your API key to .env.local and try again",
       });
-      setGenerated((prev) => new Set([...prev, property.id]));
     } finally {
-      setGenerating(null);
+      setGenerating(false);
     }
   }
 
-  if (reportableProps.length === 0) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center p-8">
-        <div className="w-16 h-16 rounded-full bg-secondary flex items-center justify-center">
-          <FileText className="w-8 h-8 text-muted-foreground" />
-        </div>
-        <div className="space-y-2">
-          <h2 className="text-xl font-bold">No properties saved yet</h2>
-          <p className="text-muted-foreground max-w-sm">
-            Save properties from the map to generate personalized analysis reports.
-          </p>
-        </div>
-        <Button onClick={() => setActiveTab("map")} variant="outline" className="gap-2">
-          <Map className="w-4 h-4" /> Browse and save properties
-        </Button>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Header */}
-      <div className="border-b border-border p-4 flex items-center gap-3">
-        <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/30 flex items-center justify-center">
-          <FileText className="w-4 h-4 text-primary" />
+    <div className="flex-1 flex overflow-hidden relative">
+      {/* ── Left sidebar ─────────────────────────────────────────── */}
+      <div className="w-52 shrink-0 flex flex-col border-r border-border bg-card/20">
+        <div className="p-2.5 border-b border-border">
+          <div className="flex rounded-lg bg-secondary/40 p-0.5">
+            {(["properties", "watchlist"] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={cn(
+                  "flex-1 py-1.5 text-[11px] font-semibold rounded-md capitalize transition-all",
+                  activeTab === tab
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {tab === "properties" ? "Properties" : "Watchlist"}
+              </button>
+            ))}
+          </div>
         </div>
-        <div>
-          <h2 className="font-semibold">Property Reports</h2>
-          <p className="text-xs text-muted-foreground">
-            AI-generated analysis for {reportableProps.length} properties
-          </p>
+
+        <div className="px-3 py-2 flex items-center justify-between">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/70">
+            Listings
+          </span>
+          <span className="text-[10px] font-bold bg-primary/15 text-primary px-1.5 py-0.5 rounded-full">
+            {displayProperties.length}
+          </span>
+        </div>
+
+        <ScrollArea className="flex-1">
+          <div className="p-2 space-y-2">
+            {displayProperties.length === 0 && (
+              <div className="py-10 text-center px-3">
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  {activeTab === "watchlist"
+                    ? "No saved properties yet. Bookmark listings from the map."
+                    : "No properties found."}
+                </p>
+              </div>
+            )}
+            {displayProperties.map((property) => (
+              <PropertySidebarCard
+                key={property.id}
+                property={property}
+                isSelected={selectedProperty?.id === property.id}
+                isSaved={isPropertySaved(property.id)}
+                onSelect={() =>
+                  setSelectedProperty(
+                    selectedProperty?.id === property.id ? null : property
+                  )
+                }
+                onSave={() =>
+                  isPropertySaved(property.id)
+                    ? unsaveProperty(property.id)
+                    : saveProperty(property.id)
+                }
+              />
+            ))}
+          </div>
+        </ScrollArea>
+
+        <div className="px-3 py-2 border-t border-border flex flex-wrap gap-1.5">
+          <span className="text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full">
+            Operational
+          </span>
+          <span className="text-[10px] text-muted-foreground/50">
+            {properties.length} listings
+          </span>
         </div>
       </div>
 
-      <ScrollArea className="flex-1 p-4">
-        <div className="max-w-2xl mx-auto space-y-4">
-          {/* Context */}
-          <Card className="border-primary/20 bg-primary/5">
-            <CardContent className="p-4 flex gap-3">
-              <Sparkles className="w-5 h-5 text-primary shrink-0 mt-0.5" />
-              <div>
-                <div className="text-sm font-medium">AI-powered property reports</div>
-                <div className="text-xs text-muted-foreground mt-0.5">
-                  Each report includes a deal analysis, neighborhood comparison, risk assessment,
-                  and buyer-specific recommendations. Download as a shareable HTML file.
+      {/* ── Main AI panel ─────────────────────────────────────────── */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {selectedProperty && (
+          <div className="border-b border-border bg-card/40 px-5 py-2 flex items-center gap-3 text-xs">
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold truncate">
+                {selectedProperty.location.address}
+              </span>
+              <span className="ml-2 text-muted-foreground">
+                {formatPrice(selectedProperty.price)}
+              </span>
+              {selectedProperty.dealScore && (
+                <span className="ml-2 text-primary font-bold">
+                  Score {selectedProperty.dealScore.total}
+                </span>
+              )}
+            </div>
+            <button
+              onClick={() => generateReport(selectedProperty)}
+              disabled={generating}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border hover:bg-secondary transition-colors disabled:opacity-50 font-medium shrink-0"
+            >
+              {generating ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : generated.has(selectedProperty.id) ? (
+                <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+              ) : (
+                <Download className="w-3 h-3" />
+              )}
+              {generating
+                ? "Generating…"
+                : generated.has(selectedProperty.id)
+                ? "Download again"
+                : "Download report"}
+            </button>
+          </div>
+        )}
+
+        <ScrollArea
+          className="flex-1"
+          ref={scrollRef as React.RefObject<HTMLDivElement>}
+        >
+          <div className="max-w-2xl mx-auto px-6 py-8">
+            {messages.length === 0 ? (
+              <div className="flex flex-col items-center justify-center min-h-[52vh] gap-7 text-center">
+                <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center shadow-xl shadow-primary/25">
+                  <Home className="w-8 h-8 text-primary-foreground" />
                 </div>
-              </div>
-            </CardContent>
-          </Card>
 
-          {/* Property list */}
-          {reportableProps.map((property) => (
-            <PropertyReportCard
-              key={property.id}
-              property={property}
-              isGenerating={generating === property.id}
-              isGenerated={generated.has(property.id)}
-              onGenerate={() => generateReport(property)}
-            />
-          ))}
+                <div className="space-y-2">
+                  <h2 className="text-[22px] font-bold tracking-tight">
+                    Helio Intelligence
+                  </h2>
+                  <p className="text-sm text-muted-foreground max-w-[300px] leading-relaxed">
+                    Generate floor plan schematics, create PDF market reports,
+                    or ask any real estate question. Multimodal — all data is
+                    shared.
+                  </p>
+                </div>
 
-          <Separator />
-
-          {/* Comparison report */}
-          {savedProps.length >= 2 && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <FileText className="w-4 h-4" />
-                  Full Comparison Report
-                </CardTitle>
-                <CardDescription>
-                  Side-by-side analysis of all {savedProps.length} saved properties with a final recommendation
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex gap-2 flex-wrap mb-4">
-                  {savedProps.map((p) => (
-                    <Badge key={p.id} variant="secondary" className="text-xs gap-1">
-                      <Home className="w-3 h-3" />
-                      {p.location.address.split(" ").slice(0, 2).join(" ")}
-                    </Badge>
+                <div className="w-full max-w-md grid grid-cols-2 gap-2.5">
+                  {QUICK_ACTIONS.map((action) => (
+                    <button
+                      key={action.id}
+                      onClick={() => handleQuickAction(action)}
+                      disabled={isLoading}
+                      className="flex items-start gap-2.5 p-3 rounded-xl border border-border hover:border-primary/50 hover:bg-primary/5 text-left transition-all group disabled:opacity-50"
+                    >
+                      <span className="shrink-0 text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded mt-0.5 leading-none font-mono">
+                        {action.tag}
+                      </span>
+                      <span className="text-[12px] text-muted-foreground group-hover:text-foreground transition-colors leading-snug">
+                        {action.label}
+                      </span>
+                    </button>
                   ))}
                 </div>
-                <Button className="w-full gap-2" variant="outline">
-                  <Download className="w-4 h-4" />
-                  Download comparison report (coming soon)
-                </Button>
-              </CardContent>
-            </Card>
-          )}
+              </div>
+            ) : (
+              <div className="space-y-4 pb-2">
+                {messages.map((message) => (
+                  <div
+                    key={message.id}
+                    className={cn(
+                      "flex gap-3",
+                      message.role === "user" ? "flex-row-reverse" : "flex-row"
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        "w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5",
+                        message.role === "user"
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-card border border-border"
+                      )}
+                    >
+                      {message.role === "user" ? (
+                        <User className="w-3.5 h-3.5" />
+                      ) : (
+                        <Bot className="w-3.5 h-3.5 text-primary" />
+                      )}
+                    </div>
+                    <div
+                      className={cn(
+                        "max-w-[80%] rounded-xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap",
+                        message.role === "user"
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-card border border-border"
+                      )}
+                    >
+                      {message.imageUrl && (
+                        <div className="mb-2 -mx-1">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={message.imageUrl}
+                            alt={message.imageCaption ?? "Floor plan"}
+                            className="rounded-lg border border-border max-w-full"
+                          />
+                          <button
+                            onClick={() =>
+                              downloadImage(
+                                message.imageUrl!,
+                                message.imageCaption ?? "helio-schematic"
+                              )
+                            }
+                            className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-lg border border-border hover:bg-secondary transition-colors"
+                          >
+                            <Download className="w-3 h-3" />
+                            Download schematic
+                          </button>
+                        </div>
+                      )}
+                      {message.content}
+                      <div
+                        className={cn(
+                          "text-[10px] mt-1.5",
+                          message.role === "user"
+                            ? "text-primary-foreground/50"
+                            : "text-muted-foreground"
+                        )}
+                      >
+                        {new Date(message.timestamp).toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+
+                {isLoading && (
+                  <div className="flex gap-3">
+                    <div className="w-7 h-7 rounded-lg bg-card border border-border flex items-center justify-center shrink-0">
+                      <Bot className="w-3.5 h-3.5 text-primary" />
+                    </div>
+                    <div className="bg-card border border-border rounded-xl px-4 py-3 flex items-center gap-2">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />
+                      <span className="text-sm text-muted-foreground">
+                        Working…
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </ScrollArea>
+
+        <div className="border-t border-border p-4">
+          <div className="max-w-2xl mx-auto">
+            <div className="flex items-end gap-2 rounded-xl border border-border bg-card/40 px-3 py-2.5 focus-within:border-primary/50 transition-colors">
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                  }
+                }}
+                placeholder="Ask about floor plans, reports, market analysis..."
+                className="flex-1 bg-transparent text-sm resize-none outline-none min-h-[20px] max-h-28 placeholder:text-muted-foreground/50 leading-relaxed"
+                rows={1}
+              />
+              <button
+                onClick={() => sendMessage()}
+                disabled={!input.trim() || isLoading}
+                className="shrink-0 w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground transition-opacity disabled:opacity-30 hover:opacity-90"
+              >
+                {isLoading ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Send className="w-3.5 h-3.5" />
+                )}
+              </button>
+            </div>
+            <p className="text-center text-[10px] text-muted-foreground/50 mt-2">
+              Shift+Enter new line · Enter to send
+            </p>
+          </div>
         </div>
-      </ScrollArea>
+      </div>
+
+      {/* ── Email modal ───────────────────────────────────────────── */}
+      {emailModalOpen && (
+        <EmailModal
+          defaultEmail={profile?.email ?? ""}
+          scope={getSummaryScope()}
+          onClose={() => setEmailModalOpen(false)}
+          onSubmit={(email) => sendEmail(email)}
+        />
+      )}
     </div>
   );
 }
 
-function PropertyReportCard({
-  property,
-  isGenerating,
-  isGenerated,
-  onGenerate,
+/* ── Email modal ──────────────────────────────────────────────────── */
+function EmailModal({
+  defaultEmail,
+  scope,
+  onClose,
+  onSubmit,
 }: {
-  property: Property;
-  isGenerating: boolean;
-  isGenerated: boolean;
-  onGenerate: () => void;
+  defaultEmail: string;
+  scope: Property[];
+  onClose: () => void;
+  onSubmit: (email: string) => void;
 }) {
-  const score = property.dealScore;
+  const [email, setEmail] = useState(defaultEmail);
+  const [error, setError] = useState<string | null>(null);
+
+  function submit() {
+    const trimmed = email.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      setError("Enter a valid email address");
+      return;
+    }
+    onSubmit(trimmed);
+  }
 
   return (
-    <Card className={cn(score && getDealScoreBg(score.total), "transition-all")}>
-      <CardContent className="p-4">
-        <div className="flex gap-3">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="font-semibold text-sm truncate">
-                  {property.location.address}
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  {property.location.neighborhood} · {formatFullPrice(property.price)}
-                </div>
-              </div>
-              {score && (
-                <div className="shrink-0 text-right">
-                  <div className={cn("text-xl font-black", getDealScoreColor(score.total))}>
-                    {score.total}
-                  </div>
-                  <div className="text-[10px] text-muted-foreground">score</div>
-                </div>
+    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="w-full max-w-md bg-card border border-border rounded-2xl shadow-2xl">
+        <div className="p-5 border-b border-border flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-primary/10 border border-primary/30 flex items-center justify-center">
+            <Mail className="w-4 h-4 text-primary" />
+          </div>
+          <div className="flex-1">
+            <div className="font-semibold text-sm">
+              Email me a property summary
+            </div>
+            <div className="text-[11px] text-muted-foreground">
+              {scope.length === 1
+                ? scope[0].location.address
+                : `${scope.length} properties · AI-generated analysis`}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-7 h-7 rounded-md hover:bg-secondary flex items-center justify-center"
+          >
+            <X className="w-4 h-4 text-muted-foreground" />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          <div>
+            <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+              Email address
+            </label>
+            <input
+              type="email"
+              autoFocus
+              value={email}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                if (error) setError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submit();
+              }}
+              placeholder="you@example.com"
+              className={cn(
+                "mt-1 w-full px-3 py-2 rounded-lg border bg-background text-sm outline-none transition-colors",
+                error
+                  ? "border-red-500/60 focus:border-red-500"
+                  : "border-border focus:border-primary/60"
               )}
-            </div>
-
-            <div className="flex gap-3 text-xs text-muted-foreground mt-2">
-              <span>{formatBeds(property.details.beds)}</span>
-              <span>{formatBaths(property.details.baths)}</span>
-              <span>{formatSqft(property.details.sqft)}</span>
-              <span>{formatDaysOnMarket(property.daysOnMarket)}</span>
-            </div>
-
-            {score && (
-              <p className="text-xs text-muted-foreground mt-2 line-clamp-2">
-                {score.summary}
-              </p>
+            />
+            {error && (
+              <div className="text-[11px] text-red-400 mt-1">{error}</div>
             )}
           </div>
-        </div>
 
-        <div className="mt-3">
-          <Button
-            onClick={onGenerate}
-            disabled={isGenerating}
-            size="sm"
-            className={cn(
-              "w-full gap-2",
-              isGenerated && "border-emerald-500/30 text-emerald-400 hover:text-emerald-300"
-            )}
-            variant={isGenerated ? "outline" : "default"}
-          >
-            {isGenerating ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                Generating report...
-              </>
-            ) : isGenerated ? (
-              <>
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                Download again
-              </>
-            ) : (
-              <>
-                <Download className="w-3.5 h-3.5" />
-                Generate & download report
-              </>
-            )}
-          </Button>
+          {scope.length > 0 && (
+            <div className="rounded-lg border border-border bg-secondary/30 p-3">
+              <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wide mb-2">
+                Will include
+              </div>
+              <ul className="space-y-1">
+                {scope.slice(0, 4).map((p) => (
+                  <li
+                    key={p.id}
+                    className="text-[12px] flex items-center justify-between gap-2"
+                  >
+                    <span className="truncate">{p.location.address}</span>
+                    <span className="text-muted-foreground shrink-0">
+                      {formatPrice(p.price)}
+                    </span>
+                  </li>
+                ))}
+                {scope.length > 4 && (
+                  <li className="text-[11px] text-muted-foreground">
+                    +{scope.length - 4} more
+                  </li>
+                )}
+              </ul>
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-1">
+            <button
+              onClick={onClose}
+              className="flex-1 px-4 py-2 rounded-lg border border-border hover:bg-secondary text-sm font-medium transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={submit}
+              className="flex-1 px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:opacity-90 text-sm font-semibold transition-opacity flex items-center justify-center gap-1.5"
+            >
+              <Mail className="w-3.5 h-3.5" />
+              Send
+            </button>
+          </div>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
+  );
+}
+
+/* ── Property sidebar card ──────────────────────────────────────────── */
+function PropertySidebarCard({
+  property,
+  isSelected,
+  isSaved,
+  onSelect,
+  onSave,
+}: {
+  property: Property;
+  isSelected: boolean;
+  isSaved: boolean;
+  onSelect: () => void;
+  onSave: () => void;
+}) {
+  const changeYoY = property.neighborhoodStats?.priceChangeYoY ?? 0;
+  const isPositive = changeYoY >= 0;
+
+  return (
+    <div
+      onClick={onSelect}
+      className={cn(
+        "rounded-xl border overflow-hidden cursor-pointer transition-all",
+        isSelected
+          ? "border-primary ring-1 ring-primary/30 bg-primary/5"
+          : "border-border hover:border-primary/30"
+      )}
+    >
+      {property.photos?.[0] && (
+        <div className="relative h-[88px] overflow-hidden">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={property.photos[0]}
+            alt={property.location.address}
+            className="w-full h-full object-cover"
+          />
+          <div
+            className={cn(
+              "absolute top-1.5 left-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-md backdrop-blur-sm",
+              isPositive
+                ? "bg-emerald-500/20 text-emerald-300"
+                : "bg-red-500/20 text-red-300"
+            )}
+          >
+            {isPositive ? "+" : ""}
+            {changeYoY}%
+          </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onSave();
+            }}
+            className="absolute top-1.5 right-1.5 w-6 h-6 rounded-md bg-black/50 backdrop-blur-sm flex items-center justify-center hover:bg-black/70 transition-colors"
+          >
+            {isSaved ? (
+              <BookmarkCheck className="w-3 h-3 text-primary" />
+            ) : (
+              <Bookmark className="w-3 h-3 text-white/80" />
+            )}
+          </button>
+        </div>
+      )}
+
+      <div className="p-2">
+        <div className="font-bold text-[12px] leading-tight">
+          {formatPrice(property.price)}
+          {property.listingType === "for_rent" && (
+            <span className="font-normal text-muted-foreground">/mo</span>
+          )}
+        </div>
+        <div className="text-[11px] font-medium truncate mt-0.5 text-foreground/90">
+          {property.location.address}
+        </div>
+        <div className="text-[10px] text-muted-foreground truncate mt-0.5">
+          {property.location.city}, {property.location.state}{" "}
+          {property.location.zip} · {property.details.sqft.toLocaleString()} sf
+        </div>
+        <div className="text-[10px] text-muted-foreground/60 truncate mt-0.5">
+          {property.details.propertyType.replace(/_/g, " ")}
+        </div>
+      </div>
+    </div>
   );
 }
