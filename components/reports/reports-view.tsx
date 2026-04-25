@@ -62,6 +62,8 @@ const QUICK_ACTIONS: QuickAction[] = [
 export function ReportsView() {
   const {
     properties,
+    propertyMap,
+    activeSearchSessionId,
     savedProperties,
     saveProperty,
     unsaveProperty,
@@ -96,8 +98,14 @@ export function ReportsView() {
     }
   }, [messages, isLoading]);
 
+  // Saved listings may live outside the current search results, so fall
+  // back to the persisted propertyMap for lookups.
   const savedPropsList = savedProperties
-    .map((s) => properties.find((p) => p.id === s.propertyId))
+    .map(
+      (s) =>
+        propertyMap[s.propertyId] ??
+        properties.find((p) => p.id === s.propertyId)
+    )
     .filter(Boolean) as Property[];
 
   const displayProperties =
@@ -161,15 +169,15 @@ export function ReportsView() {
     setLoading(true);
 
     try {
-      const savedProps = savedPropsList;
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: [...messages, { role: "user", content: text }],
           context: {
-            properties: properties.slice(0, 8),
-            savedProperties: savedProps,
+            searchSessionId: activeSearchSessionId,
+            selectedPropertyId: selectedProperty?.id ?? null,
+            savedPropertyIds: savedProperties.map((s) => s.propertyId),
             userPreferences: profile?.preferences,
             userName: profile?.name,
           },
@@ -296,7 +304,11 @@ export function ReportsView() {
       const res = await fetch("/api/report", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ property, userProfile: profile }),
+        body: JSON.stringify({
+          propertyId: property.id,
+          searchSessionId: activeSearchSessionId,
+          userProfile: profile,
+        }),
       });
       if (!res.ok) throw new Error("Failed");
       const blob = await res.blob();

@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Property } from "@/types/property";
+import { getPropertiesByIds, getPropertyContext, getSearchSession } from "@/lib/server/listings";
+import { generateNarrative } from "@/lib/server/ai";
 import { BuyerPreferences } from "@/types/user";
+
+export const runtime = "nodejs";
 
 interface ChatMessage {
   role: "user" | "assistant" | "system";
@@ -10,135 +13,110 @@ interface ChatMessage {
 interface ChatRequest {
   messages: ChatMessage[];
   context: {
-    properties: Property[];
-    savedProperties: Property[];
+    searchSessionId?: string | null;
+    selectedPropertyId?: string | null;
+    savedPropertyIds?: string[];
     userPreferences?: Partial<BuyerPreferences>;
     userName?: string;
   };
 }
 
-function buildSystemPrompt(context: ChatRequest["context"]): string {
-  const { properties, savedProperties, userPreferences, userName } = context;
-
-  const propertyList = properties
+function buildSystemPrompt(input: {
+  userName?: string;
+  userPreferences?: Partial<BuyerPreferences>;
+  searchSummary: string;
+  activeProperties: ReturnType<typeof getPropertiesByIds>;
+  selectedContext: ReturnType<typeof getPropertyContext>;
+  savedProperties: ReturnType<typeof getPropertiesByIds>;
+}) {
+  const propertyList = input.activeProperties
+    .slice(0, 8)
     .map(
-      (p) =>
-        `- ${p.location.address}, ${p.location.neighborhood}: ${p.price.toLocaleString()} (${p.details.beds}bd/${p.details.baths}ba, ${p.details.sqft}sqft, ${p.daysOnMarket}d on market, Deal Score: ${p.dealScore?.total ?? "N/A"}/100 - ${p.dealScore?.label ?? "Unscored"})`
+      (property) =>
+        `- ${property.location.address}, ${property.location.neighborhood}: $${property.price.toLocaleString()} (${property.details.beds}bd/${property.details.baths}ba, ${property.details.sqft} sqft, Deal Score ${property.dealScore?.total ?? "N/A"}/100, DOM ${property.daysOnMarket})`
     )
     .join("\n");
 
-  const savedList =
-    savedProperties.length > 0
-      ? savedProperties
-          .map((p) => `- ${p.location.address}: Deal Score ${p.dealScore?.total ?? "N/A"} (${p.dealScore?.label ?? ""})`)
-          .join("\n")
-      : "None saved yet";
+  const savedList = input.savedProperties.length
+    ? input.savedProperties
+        .map(
+          (property) =>
+            `- ${property.location.address} (${property.location.neighborhood}) · Deal Score ${property.dealScore?.total ?? "N/A"}`
+        )
+        .join("\n")
+    : "None saved yet";
 
-  const prefs = userPreferences
-    ? `Budget: $${userPreferences.minPrice?.toLocaleString() ?? "any"} - $${userPreferences.maxPrice?.toLocaleString() ?? "any"}, Min beds: ${userPreferences.minBeds ?? "any"}, Locations: ${userPreferences.targetNeighborhoods?.join(", ") || "anywhere in the U.S."}, Must-haves: ${userPreferences.mustHaves?.join(", ") || "none specified"}`
-    : "No preferences set";
+  const prefs = input.userPreferences
+    ? `Budget: $${input.userPreferences.minPrice?.toLocaleString() ?? "any"} - $${input.userPreferences.maxPrice?.toLocaleString() ?? "any"}, Beds: ${input.userPreferences.minBeds ?? "any"}+, Baths: ${input.userPreferences.minBaths ?? "any"}+, Locations: ${input.userPreferences.targetNeighborhoods?.join(", ") || "anywhere"}, Must-haves: ${input.userPreferences.mustHaves?.join(", ") || "none"}`
+    : "No saved buyer preferences.";
 
-  return `You are Helio AI, an expert real estate assistant covering the U.S. housing market. You have full context of the user's property search and preferences.
+  const selected = input.selectedContext
+    ? `Focused property: ${input.selectedContext.property.location.address}\nNeighborhood: ${input.selectedContext.neighborhoodSummary}\nMarket position: ${input.selectedContext.marketPosition}`
+    : "No focused property selected.";
 
-USER: ${userName ?? "Buyer"}
-PREFERENCES: ${prefs}
+  return `You are Helio AI, an expert real-estate search agent.
 
-PROPERTIES IN SEARCH (${properties.length} total):
-${propertyList}
+User: ${input.userName ?? "Buyer"}
+Preferences: ${prefs}
+Active search: ${input.searchSummary}
 
-SAVED / SHORTLISTED:
+Active search results (${input.activeProperties.length}):
+${propertyList || "No active listings."}
+
+Saved shortlist:
 ${savedList}
 
-Your role:
-- Provide sharp, specific property insights based on actual data (price vs AVM, days on market, school ratings, risk factors)
-- Give honest recommendations — if a property is overpriced or risky, say so clearly
-- Reference specific addresses and numbers when answering
-- Be concise and direct — no fluff, no generic advice
-- Use the Deal Score breakdown to explain value: Value (30%), Location (25%), Condition (20%), Momentum (15%), Risk (10%)
-- When comparing, surface the clearest differentiation signals
-- Help the user think like a savvy buyer, not just a browser
+${selected}
 
-Do not: make up data not in the context, give legal advice, promise specific returns, or be evasive.
-Respond in a conversational but expert tone. Keep answers under 300 words unless detail is explicitly requested.`;
+Rules:
+- Ground every answer in the supplied search results and property context.
+- Mention concrete addresses, numbers, risks, and neighborhood context when available.
+- Be concise, direct, and useful.
+- If asked for a recommendation, explain the trade-offs clearly.
+- Do not invent facts beyond the provided context.`;
 }
 
 export async function POST(req: NextRequest) {
-  const body: ChatRequest = await req.json();
+  const body = (await req.json()) as ChatRequest;
   const { messages, context } = body;
 
-  const systemPrompt = buildSystemPrompt(context);
-  const formattedMessages = [
-    { role: "system" as const, content: systemPrompt },
-    ...messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
-  ];
+  const searchSession = context.searchSessionId ? getSearchSession(context.searchSessionId) : null;
+  const activeProperties = searchSession ? getPropertiesByIds(searchSession.propertyIds) : [];
+  const savedProperties = getPropertiesByIds(context.savedPropertyIds ?? []);
+  const selectedContext = context.selectedPropertyId ? getPropertyContext(context.selectedPropertyId) : null;
 
-  // Try Groq first (faster, cheaper), fall back to OpenAI
-  const groqKey = process.env.GROQ_API_KEY;
-  const openaiKey = process.env.OPENAI_API_KEY;
-
-  if (groqKey) {
-    try {
-      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${groqKey}`,
-        },
-        body: JSON.stringify({
-          model: "llama-3.3-70b-versatile",
-          messages: formattedMessages,
-          max_tokens: 500,
-          temperature: 0.7,
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        const message = data.choices[0]?.message?.content ?? "I couldn't generate a response.";
-        return NextResponse.json({ message });
-      }
-    } catch {
-      // Fall through to OpenAI
-    }
-  }
-
-  if (openaiKey) {
-    try {
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${openaiKey}`,
-        },
-        body: JSON.stringify({
-          model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
-          messages: formattedMessages,
-          max_tokens: 500,
-          temperature: 0.7,
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        const message = data.choices[0]?.message?.content ?? "I couldn't generate a response.";
-        return NextResponse.json({ message });
-      }
-    } catch {
-      // Fall through
-    }
-  }
-
-  // No API keys — return a helpful demo response
-  const demoResponses: Record<string, string> = {
-    default: `Great question! To unlock AI-powered responses, add your GROQ_API_KEY or OPENAI_API_KEY to .env.local.
-
-In the meantime, here's what I can see in your search:
-${context.properties.slice(0, 3).map((p) => `• ${p.location.address} (${p.location.neighborhood}): $${p.price.toLocaleString()} · Deal Score ${p.dealScore?.total ?? "N/A"} — ${p.dealScore?.label ?? ""}`).join("\n")}
-
-The highest Deal Score is **${Math.max(...context.properties.map((p) => p.dealScore?.total ?? 0))}** — that's your strongest candidate based on value, location, condition, market momentum, and risk.`,
-  };
-
-  return NextResponse.json({
-    message: demoResponses.default,
+  const systemPrompt = buildSystemPrompt({
+    userName: context.userName,
+    userPreferences: context.userPreferences,
+    searchSummary: searchSession?.summary ?? "Current property search",
+    activeProperties,
+    selectedContext,
+    savedProperties,
   });
+
+  const latestUserMessage = [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
+
+  const prompt = `${messages
+    .map((message) => `${message.role.toUpperCase()}: ${message.content}`)
+    .join("\n\n")}
+
+Respond to the latest user request: ${latestUserMessage}`;
+
+  const fallback = activeProperties.length
+    ? `Here are the strongest options in the current search:\n${activeProperties
+        .slice(0, 3)
+        .map(
+          (property) =>
+            `• ${property.location.address} — $${property.price.toLocaleString()} · Deal Score ${property.dealScore?.total ?? "N/A"} · ${property.location.neighborhood}`
+        )
+        .join("\n")}`
+    : "I couldn't find active property context for that search yet. Try refreshing the search and ask again.";
+
+  const message = await generateNarrative({
+    systemPrompt,
+    prompt,
+    fallback,
+  });
+
+  return NextResponse.json({ message });
 }

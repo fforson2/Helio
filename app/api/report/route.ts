@@ -1,22 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Property } from "@/types/property";
+import { getPropertyContext } from "@/lib/server/listings";
+import { generateNarrative } from "@/lib/server/ai";
 import { UserProfile } from "@/types/user";
 
+export const runtime = "nodejs";
+
 interface ReportRequest {
-  property: Property;
+  propertyId: string;
+  searchSessionId?: string | null;
   userProfile: UserProfile | null;
 }
 
-function generateReportHTML(property: Property, userProfile: UserProfile | null, aiAnalysis: string): string {
+function generateReportHTML(property: NonNullable<ReturnType<typeof getPropertyContext>>["property"], userProfile: UserProfile | null, aiAnalysis: string): string {
   const score = property.dealScore;
   const scoreColor =
     (score?.total ?? 0) >= 85
       ? "#34d399"
       : (score?.total ?? 0) >= 70
-      ? "#60a5fa"
-      : (score?.total ?? 0) >= 55
-      ? "#fbbf24"
-      : "#f87171";
+        ? "#60a5fa"
+        : (score?.total ?? 0) >= 55
+          ? "#fbbf24"
+          : "#f87171";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -101,17 +105,21 @@ function generateReportHTML(property: Property, userProfile: UserProfile | null,
     <p class="score-summary">${score.summary}</p>
     <div class="breakdown">
       ${Object.entries({
-        "Value": score.breakdown.valueScore,
-        "Location": score.breakdown.locationScore,
-        "Condition": score.breakdown.conditionScore,
-        "Momentum": score.breakdown.marketMomentumScore,
-        "Risk": score.breakdown.riskScore,
-      }).map(([label, value]) => `
+        Value: score.breakdown.valueScore,
+        Location: score.breakdown.locationScore,
+        Condition: score.breakdown.conditionScore,
+        Momentum: score.breakdown.marketMomentumScore,
+        Risk: score.breakdown.riskScore,
+      })
+        .map(
+          ([label, value]) => `
       <div class="breakdown-row">
         <span class="breakdown-label">${label}</span>
         <div class="bar-track"><div class="bar-fill" style="width:${value}%"></div></div>
         <span class="breakdown-value">${value}</span>
-      </div>`).join("")}
+      </div>`
+        )
+        .join("")}
     </div>
   </div>
   ` : ""}
@@ -134,7 +142,7 @@ function generateReportHTML(property: Property, userProfile: UserProfile | null,
     <div class="section-title">Financial Overview</div>
     ${property.estimatedValue ? `<div class="info-row"><span class="info-label">Estimated Value (AVM)</span><span class="${property.estimatedValue > property.price ? "positive" : "negative"}">$${property.estimatedValue.toLocaleString()}</span></div>` : ""}
     ${property.rentalEstimate ? `<div class="info-row"><span class="info-label">Estimated Rental Income</span><span>$${property.rentalEstimate.toLocaleString()}/mo</span></div>` : ""}
-    ${property.taxRate ? `<div class="info-row"><span class="info-label">Est. Annual Property Tax</span><span>$${Math.round(property.price * property.taxRate / 100).toLocaleString()}</span></div>` : ""}
+    ${property.taxRate ? `<div class="info-row"><span class="info-label">Est. Annual Property Tax</span><span>$${Math.round((property.price * property.taxRate) / 100).toLocaleString()}</span></div>` : ""}
     <div class="info-row"><span class="info-label">Neighborhood Median Price</span><span>$${property.neighborhoodStats.medianPrice.toLocaleString()}</span></div>
     <div class="info-row"><span class="info-label">Price Trend (YoY)</span><span class="${property.neighborhoodStats.priceChangeYoY > 0 ? "positive" : "negative"}">${property.neighborhoodStats.priceChangeYoY > 0 ? "+" : ""}${property.neighborhoodStats.priceChangeYoY}%</span></div>
   </div>
@@ -158,71 +166,31 @@ function generateReportHTML(property: Property, userProfile: UserProfile | null,
 }
 
 export async function POST(req: NextRequest) {
-  const { property, userProfile }: ReportRequest = await req.json();
+  const { propertyId, userProfile }: ReportRequest = await req.json();
+  const context = getPropertyContext(propertyId);
 
-  let aiAnalysis = property.description;
+  if (!context) {
+    return NextResponse.json({ error: "Property not found" }, { status: 404 });
+  }
 
-  const groqKey = process.env.GROQ_API_KEY;
-  const openaiKey = process.env.OPENAI_API_KEY;
-
-  const analysisPrompt = `Write a professional property analysis report section for this listing. Be specific, analytical, and buyer-focused. Cover: deal value assessment, key strengths, key concerns, and a final recommendation. Use the data provided.
+  const property = context.property;
+  const analysisPrompt = `Write a professional property analysis report section for this listing. Be specific, analytical, and buyer-focused. Cover deal value, strengths, concerns, neighborhood context, and a final recommendation.
 
 Property: ${property.location.address}, ${property.location.neighborhood}
 Price: $${property.price.toLocaleString()} | AVM: $${property.estimatedValue?.toLocaleString() ?? "N/A"}
 ${property.details.beds}bd/${property.details.baths}ba | ${property.details.sqft.toLocaleString()} sqft | Built ${property.details.yearBuilt}
 Days on market: ${property.daysOnMarket} | Neighborhood avg: ${property.neighborhoodStats.avgDaysOnMarket} days
 Deal Score: ${property.dealScore?.total ?? "N/A"}/100 (${property.dealScore?.label ?? ""})
-School rating: ${property.schoolRating}/10 | Walk score: ${property.walkScore}
-Fire risk: ${property.riskProfile.fireRisk} | HOA: ${property.hoaFee ? "$" + property.hoaFee + "/mo" : "None"}
-${userProfile?.preferences ? `Buyer budget: $${userProfile.preferences.minPrice?.toLocaleString()}-$${userProfile.preferences.maxPrice?.toLocaleString()}, needs ${userProfile.preferences.minBeds}+ beds` : ""}
+Neighborhood summary: ${context.neighborhoodSummary}
+Market position: ${context.marketPosition}
+Buyer profile: ${userProfile?.preferences ? `Budget $${userProfile.preferences.minPrice?.toLocaleString()}-$${userProfile.preferences.maxPrice?.toLocaleString()}, needs ${userProfile.preferences.minBeds}+ beds` : "Not provided"}
 
 Write 3-4 focused paragraphs. Be direct and honest.`;
 
-  if (groqKey) {
-    try {
-      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${groqKey}`,
-        },
-        body: JSON.stringify({
-          model: "llama-3.3-70b-versatile",
-          messages: [{ role: "user", content: analysisPrompt }],
-          max_tokens: 600,
-          temperature: 0.6,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        aiAnalysis = data.choices[0]?.message?.content ?? aiAnalysis;
-      }
-    } catch {
-      // Use description as fallback
-    }
-  } else if (openaiKey) {
-    try {
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${openaiKey}`,
-        },
-        body: JSON.stringify({
-          model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
-          messages: [{ role: "user", content: analysisPrompt }],
-          max_tokens: 600,
-          temperature: 0.6,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        aiAnalysis = data.choices[0]?.message?.content ?? aiAnalysis;
-      }
-    } catch {
-      // Use description as fallback
-    }
-  }
+  const aiAnalysis = await generateNarrative({
+    prompt: analysisPrompt,
+    fallback: `${property.description}\n\n${context.neighborhoodSummary}\n${context.marketPosition}`,
+  });
 
   const html = generateReportHTML(property, userProfile, aiAnalysis);
 
