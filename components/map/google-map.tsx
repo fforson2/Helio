@@ -11,11 +11,12 @@ interface GoogleMapProps {
   onSelectProperty: (id: string | null) => void;
 }
 
-type GoogleMapsNamespace = typeof google.maps;
+type GoogleMapsNamespace = any;
 
-type MarkerOverlay = google.maps.OverlayView & {
+type MarkerOverlay = {
   setSelected: (selected: boolean) => void;
   destroy: () => void;
+  setMap: (map: unknown) => void;
 };
 
 type MarkerEntry = {
@@ -25,8 +26,8 @@ type MarkerEntry = {
 type MapViewMode = "2d" | "3d";
 
 const SCRIPT_ID = "google-maps-js-loader";
-const DEFAULT_CENTER = { lat: 34.05, lng: -118.35 } as const;
-const DEFAULT_ZOOM = 10.5;
+const DEFAULT_CENTER = { lat: 36.7783, lng: -119.4179 } as const;
+const DEFAULT_ZOOM = 5.5;
 const VECTOR_3D_ZOOM = 17;
 const RASTER_3D_ZOOM = 18;
 
@@ -34,7 +35,7 @@ let googleMapsPromise: Promise<GoogleMapsNamespace> | null = null;
 
 declare global {
   interface Window {
-    google?: typeof google;
+    google?: { maps?: GoogleMapsNamespace };
     gm_authFailure?: () => void;
   }
 }
@@ -181,7 +182,7 @@ function ensureGoogleMaps(apiKey: string): Promise<GoogleMapsNamespace> {
   return googleMapsPromise;
 }
 
-const DARK_MAP_STYLES: google.maps.MapTypeStyle[] = [
+const DARK_MAP_STYLES = [
   { elementType: "geometry", stylers: [{ color: "#1a1a1a" }] },
   { elementType: "labels.text.stroke", stylers: [{ color: "#0a0a0a" }] },
   { elementType: "labels.text.fill", stylers: [{ color: "#7a7a7a" }] },
@@ -218,7 +219,7 @@ function setMarkerAppearance(el: HTMLDivElement, property: Property, isSelected:
 
 function createMarkerOverlay(
   maps: GoogleMapsNamespace,
-  map: google.maps.Map,
+  map: any,
   property: Property,
   isSelected: boolean,
   onClick: () => void
@@ -226,7 +227,7 @@ function createMarkerOverlay(
   const PriceMarker = class extends maps.OverlayView {
     private el: HTMLDivElement;
     private clickHandler: () => void;
-    private position: google.maps.LatLngLiteral;
+    private position: { lat: number; lng: number };
     private currentSelected: boolean;
 
     constructor() {
@@ -292,7 +293,7 @@ function showMapPlaceholder(el: HTMLDivElement, message: string, propertiesCount
 export function GoogleMap({ properties, selectedId, onSelectProperty }: GoogleMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapsRef = useRef<GoogleMapsNamespace | null>(null);
-  const mapRef = useRef<google.maps.Map | null>(null);
+  const mapRef = useRef<any>(null);
   const markersRef = useRef<Map<string, MarkerEntry>>(new Map());
   const [viewMode, setViewMode] = useState<MapViewMode>("2d");
   const hasKey = useMemo(
@@ -408,7 +409,7 @@ export function GoogleMap({ properties, selectedId, onSelectProperty }: GoogleMa
         if (cancelled || !containerRef.current) return;
         mapsRef.current = maps;
 
-        const baseOptions: google.maps.MapOptions = {
+        const baseOptions = {
           center: DEFAULT_CENTER,
           zoom: DEFAULT_ZOOM,
           mapTypeControl: false,
@@ -425,7 +426,7 @@ export function GoogleMap({ properties, selectedId, onSelectProperty }: GoogleMa
         // Vector renderer (mapId) supports tilt/heading + 3D buildings.
         // Raster renderer (no mapId) uses our dark style array but cannot tilt
         // unless we switch to satellite imagery — we handle that in applyViewMode.
-        const options: google.maps.MapOptions = hasMapId
+        const options = hasMapId
           ? { ...baseOptions, mapId: mapId ?? undefined }
           : { ...baseOptions, mapTypeId: "roadmap", styles: DARK_MAP_STYLES };
 

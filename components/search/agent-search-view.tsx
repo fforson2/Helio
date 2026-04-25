@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import { Bookmark, BookmarkCheck, ImageIcon, Loader2, Search, MoreHorizontal } from "lucide-react";
+import { Bookmark, BookmarkCheck, ExternalLink, ImageIcon, Loader2, Search, MoreHorizontal } from "lucide-react";
 import { usePropertyStore, useUserStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,6 +45,24 @@ const AGENTS: Agent[] = [
     bgClass: "bg-orange-500/10",
   },
 ];
+
+type AgentSearchResult = {
+  status: "searching" | "done" | "error";
+  summary?: string;
+  searchUrl?: string;
+  listings?: AgentListing[];
+  error?: string;
+};
+
+type AgentListing = {
+  address: string;
+  price: string;
+  beds?: number;
+  baths?: number;
+  sqft?: string;
+  url: string;
+  description?: string;
+};
 
 const LISTING_TYPE_OPTIONS = [
   { value: "homes-for-sale", label: "homes for sale" },
@@ -333,6 +351,7 @@ export function AgentSearchView() {
     "homes-for-sale"
   );
   const [activeAgent, setActiveAgent] = useState<Agent["id"] | null>(null);
+  const [agentResults, setAgentResults] = useState<Record<string, AgentSearchResult>>({});
 
   const featured = useMemo(() => {
     return [...properties]
@@ -357,6 +376,46 @@ export function AgentSearchView() {
     const cities = new Set(properties.map((property) => property.location.city));
     return cities.size;
   }, [properties]);
+
+  const hasAgentResults = Object.keys(agentResults).length > 0;
+
+  async function runAgentSearch(agentId: Agent["id"]) {
+    const trimmed = location.trim();
+    if (!trimmed) return;
+
+    setAgentResults((prev) => ({
+      ...prev,
+      [agentId]: { status: "searching" },
+    }));
+
+    try {
+      const res = await fetch("/api/agents/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ location: trimmed, agent: agentId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Search failed");
+
+      setAgentResults((prev) => ({
+        ...prev,
+        [agentId]: {
+          status: "done",
+          summary: data.summary,
+          searchUrl: data.searchUrl,
+          listings: data.listings,
+        },
+      }));
+    } catch (err) {
+      setAgentResults((prev) => ({
+        ...prev,
+        [agentId]: {
+          status: "error",
+          error: err instanceof Error ? err.message : "Search failed",
+        },
+      }));
+    }
+  }
 
   async function runSearch() {
     const trimmed = location.trim();
@@ -395,16 +454,6 @@ export function AgentSearchView() {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex-1 flex overflow-hidden">
-        <Sidebar
-          activeTab={activeTab}
-          onTabChange={setActiveTab}
-          featured={featured}
-          rest={rest}
-          watchlist={watchlist}
-          selectedPropertyId={selectedPropertyId}
-          onSelectProperty={selectProperty}
-        />
-
         <main
           className="flex-1 relative flex flex-col overflow-hidden"
           style={{
@@ -413,88 +462,178 @@ export function AgentSearchView() {
             backgroundSize: "32px 32px",
           }}
         >
-          <div className="px-4 pt-4 pb-3 border-b border-border bg-background/60 backdrop-blur-sm space-y-2">
-            <div className="flex items-center gap-2">
-              <Input
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    runSearch();
-                  }
-                }}
-                placeholder="Location (e.g. Irvine, CA)"
-                className="h-9 flex-1"
-              />
-              <select
-                value={listingType}
-                onChange={(e) =>
-                  setListingType(e.target.value as (typeof LISTING_TYPE_OPTIONS)[number]["value"])
-                }
-                className="h-9 w-44 rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-              >
-                {LISTING_TYPE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <Button
-                onClick={runSearch}
-                disabled={isSearching || !location.trim()}
-                className="h-9 gap-2"
-              >
-                {isSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-                Search
-              </Button>
+          <div className="flex-1 overflow-auto">
+            <div
+              className={cn(
+                "p-8",
+                !hasAgentResults && "flex flex-col items-center pt-16"
+              )}
+            >
+              <div className="max-w-lg mx-auto text-center space-y-8">
+                <div className="flex items-center justify-center gap-3">
+                  {AGENTS.map((agent) => {
+                    const searching = agentResults[agent.id]?.status === "searching";
+                    const done = agentResults[agent.id]?.status === "done";
+                    return (
+                      <button
+                        key={agent.id}
+                        type="button"
+                        onClick={() => runAgentSearch(agent.id)}
+                        disabled={!location.trim() || searching}
+                        className={cn(
+                          "px-4 py-1.5 rounded-md text-xs font-semibold border transition-all ring-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed",
+                          agent.bgClass,
+                          agent.textClass,
+                          agent.ringClass,
+                          searching || done
+                            ? "border-current scale-105"
+                            : "border-transparent hover:scale-105",
+                          searching && "animate-pulse"
+                        )}
+                      >
+                        {searching && (
+                          <Loader2 className="w-3 h-3 animate-spin inline mr-1.5" />
+                        )}
+                        {agent.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="space-y-3">
+                  <h2 className="text-2xl font-semibold tracking-tight">3 Agents, One Search</h2>
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    Enter a location below and click an agent to search Zillow, Redfin, or
+                    Realtor.com for listings.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 max-w-md mx-auto">
+                  <Input
+                    value={location}
+                    onChange={(e) => setLocation(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        for (const agent of AGENTS) runAgentSearch(agent.id);
+                      }
+                    }}
+                    placeholder="Enter an address or city (e.g. Irvine, CA)"
+                    className="h-10 flex-1"
+                  />
+                </div>
+                {searchError && (
+                  <p className="text-xs text-rose-400">{searchError}</p>
+                )}
+              </div>
             </div>
-            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-              <span className="uppercase tracking-wider">Try:</span>
-              <button
-                type="button"
-                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-border bg-card/60 text-foreground hover:border-primary/40 transition-colors"
-              >
-                <ImageIcon className="w-3 h-3" />
-                Use image
-              </button>
-              {searchError && <span className="text-rose-400">{searchError}</span>}
-            </div>
-          </div>
 
-          <div className="flex-1 flex items-center justify-center p-8">
-            <div className="text-center space-y-6 max-w-md">
-              <div className="flex items-center justify-center gap-3">
+            {hasAgentResults && (
+              <div className="px-6 pb-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
                 {AGENTS.map((agent) => {
-                  const active = activeAgent === agent.id || isSearching;
+                  const result = agentResults[agent.id];
+                  if (!result) return null;
                   return (
-                    <button
+                    <div
                       key={agent.id}
-                      type="button"
-                      onMouseEnter={() => setActiveAgent(agent.id)}
-                      onMouseLeave={() => setActiveAgent(null)}
                       className={cn(
-                        "px-4 py-1.5 rounded-md text-xs font-semibold border transition-all ring-1",
+                        "rounded-xl border p-4 space-y-3 ring-1",
                         agent.bgClass,
-                        agent.textClass,
-                        agent.ringClass,
-                        active ? "border-current scale-105" : "border-transparent",
-                        isSearching && "animate-pulse"
+                        agent.ringClass
                       )}
                     >
-                      {agent.label}
-                    </button>
+                      <div className="flex items-center justify-between">
+                        <span className={cn("text-sm font-semibold", agent.textClass)}>
+                          {agent.label}
+                        </span>
+                        {result.status === "searching" && (
+                          <Loader2 className={cn("w-4 h-4 animate-spin", agent.textClass)} />
+                        )}
+                        {result.status === "done" && (
+                          <span className="text-[10px] uppercase tracking-wider text-emerald-400">
+                            Done
+                          </span>
+                        )}
+                      </div>
+
+                      {result.status === "searching" && (
+                        <div className="space-y-2">
+                          <p className="text-xs text-muted-foreground animate-pulse">
+                            Searching {agent.label}...
+                          </p>
+                          <div className="h-1 w-full rounded-full bg-secondary overflow-hidden">
+                            <div
+                              className={cn(
+                                "h-full rounded-full animate-pulse",
+                                agent.id === "zillow"
+                                  ? "bg-sky-500/50"
+                                  : agent.id === "redfin"
+                                    ? "bg-rose-500/50"
+                                    : "bg-orange-500/50"
+                              )}
+                              style={{ width: "60%" }}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {result.status === "done" && (
+                        <>
+                          {result.summary && (
+                            <p className="text-xs text-muted-foreground">{result.summary}</p>
+                          )}
+                          <div className="space-y-1.5">
+                            {result.listings?.slice(0, 5).map((listing, i) => (
+                              <a
+                                key={i}
+                                href={listing.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="block p-2.5 rounded-lg bg-background/60 hover:bg-background/80 border border-border/50 transition-colors group"
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="text-xs font-medium truncate flex-1">
+                                    {listing.address}
+                                  </div>
+                                  <ExternalLink className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                                </div>
+                                <div className="text-[11px] text-muted-foreground mt-0.5">
+                                  {listing.price}
+                                  {listing.beds != null && ` · ${listing.beds}bd`}
+                                  {listing.baths != null && ` · ${listing.baths}ba`}
+                                  {listing.sqft && ` · ${listing.sqft} sqft`}
+                                </div>
+                                {listing.description && (
+                                  <div className="text-[10px] text-muted-foreground/70 mt-1 line-clamp-1">
+                                    {listing.description}
+                                  </div>
+                                )}
+                              </a>
+                            ))}
+                          </div>
+                          {result.searchUrl && (
+                            <a
+                              href={result.searchUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className={cn(
+                                "flex items-center justify-center gap-1.5 text-xs py-2 rounded-md border border-current/20 transition-colors hover:bg-background/40",
+                                agent.textClass
+                              )}
+                            >
+                              View all on {agent.label}
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          )}
+                        </>
+                      )}
+
+                      {result.status === "error" && (
+                        <p className="text-xs text-rose-400">{result.error}</p>
+                      )}
+                    </div>
                   );
                 })}
               </div>
-              <div className="space-y-2">
-                <h2 className="text-xl font-semibold tracking-tight">3 Agents, One Search</h2>
-                <p className="text-sm text-muted-foreground leading-relaxed">
-                  Enter a location above to launch parallel agents searching Zillow, Redfin, and
-                  Realtor.com simultaneously.
-                </p>
-              </div>
-            </div>
+            )}
           </div>
         </main>
       </div>
