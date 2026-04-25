@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { Send, Sparkles, Bot, User, MapPin, Loader2 } from "lucide-react";
+import { Send, Sparkles, Bot, User, MapPin, Loader2, Volume2, Square } from "lucide-react";
 import { formatPrice } from "@/lib/format";
 
 const QUICK_PROMPTS = [
@@ -25,12 +25,75 @@ export function AssistantView() {
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [ttsLoadingId, setTtsLoadingId] = useState<string | null>(null);
+  const [ttsPlayingId, setTtsPlayingId] = useState<string | null>(null);
+  const [ttsCache, setTtsCache] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, isLoading]);
+
+  useEffect(() => {
+    return () => {
+      // Revoke any blob URLs we created
+      for (const url of Object.values(ttsCache)) URL.revokeObjectURL(url);
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = "";
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function playTTS(messageId: string, text: string) {
+    if (!text.trim()) return;
+
+    // Toggle stop if the same message is playing
+    if (ttsPlayingId === messageId && audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      setTtsPlayingId(null);
+      return;
+    }
+
+    // Stop any current audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+
+    setTtsLoadingId(messageId);
+    try {
+      const cachedUrl = ttsCache[messageId];
+      let url = cachedUrl;
+      if (!url) {
+        const res = await fetch("/api/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+        if (!res.ok) throw new Error("TTS failed");
+        const blob = await res.blob();
+        url = URL.createObjectURL(blob);
+        setTtsCache((prev) => ({ ...prev, [messageId]: url }));
+      }
+
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      setTtsPlayingId(messageId);
+      audio.onended = () => {
+        setTtsPlayingId((cur) => (cur === messageId ? null : cur));
+      };
+      await audio.play();
+    } catch {
+      setTtsPlayingId(null);
+    } finally {
+      setTtsLoadingId((cur) => (cur === messageId ? null : cur));
+    }
+  }
 
   async function sendMessage(text?: string) {
     const content = (text ?? input).trim();
@@ -190,6 +253,33 @@ export function AssistantView() {
                 )}
               >
                 <div className="whitespace-pre-wrap">{message.content}</div>
+                {message.role === "assistant" && (
+                  <div className="mt-2 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => playTTS(message.id, message.content)}
+                      disabled={ttsLoadingId === message.id}
+                      className={cn(
+                        "inline-flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-md border transition-colors",
+                        "border-border hover:bg-muted/60",
+                        (ttsLoadingId === message.id) && "opacity-70 cursor-not-allowed"
+                      )}
+                      aria-label="Play voice"
+                    >
+                      {ttsLoadingId === message.id ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : ttsPlayingId === message.id ? (
+                        <Square className="w-3 h-3" />
+                      ) : (
+                        <Volume2 className="w-3 h-3" />
+                      )}
+                      <span>{ttsPlayingId === message.id ? "Stop" : "Speak"}</span>
+                    </button>
+                    <span className="text-[10px] text-muted-foreground">
+                      Voice via ElevenLabs
+                    </span>
+                  </div>
+                )}
                 <div
                   className={cn(
                     "text-[10px] mt-1.5",

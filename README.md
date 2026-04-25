@@ -54,6 +54,11 @@ NEXT_PUBLIC_MAPBOX_TOKEN=
 GROQ_API_KEY=         # preferred — faster and free tier
 OPENAI_API_KEY=       # fallback
 
+# Optional (Text-to-Speech)
+ELEVENLABS_API_KEY=
+ELEVENLABS_VOICE_ID=
+ELEVENLABS_MODEL_ID=eleven_multilingual_v2
+
 # Optional
 OPENAI_MODEL=gpt-4o-mini
 ```
