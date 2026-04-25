@@ -33,65 +33,51 @@ function CompactPropertyCard({ property, isSelected, onSelect }: CompactProperty
     <div
       onClick={onSelect}
       className={cn(
-        "group relative rounded-lg border cursor-pointer overflow-hidden transition-all",
+        "group overflow-hidden rounded-xl border cursor-pointer transition-all",
         isSelected
           ? "border-primary ring-1 ring-primary/40 bg-primary/5"
-          : "border-border/50 bg-card/60 hover:border-primary/30 hover:bg-card/80"
+          : "border-white/[0.08] bg-white/[0.035] hover:border-primary/30 hover:bg-white/[0.05]"
       )}
     >
-      <div className="relative h-28 overflow-hidden">
-        <div className="flex h-full">
-          {property.photos.slice(0, 2).map((photo, i) => (
-            <div key={i} className={cn("relative h-full flex-1", i === 0 && "border-r border-background/30")}>
-              <Image
-                src={photo}
-                alt={property.location.address}
-                fill
-                className="object-cover"
-                sizes="160px"
-              />
-            </div>
-          ))}
-          {property.photos.length < 2 && (
-            <div className="relative h-full flex-1 bg-muted" />
-          )}
+      <div className="relative aspect-[1.45/1] overflow-hidden">
+        <Image
+          src={property.photos[0] ?? "https://images.unsplash.com/photo-1568605114967-8130f3a36994?w=800"}
+          alt={property.location.address}
+          fill
+          sizes="320px"
+          className="object-cover transition duration-300 group-hover:scale-105"
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/15 to-transparent" />
+
+        <div className="absolute left-2.5 top-2.5 rounded-md bg-black/65 px-2 py-1 text-[11px] font-semibold text-white">
+          {formatPrice(property.price)}
+          {property.listingType === "for_rent" ? "/mo" : ""}
         </div>
-
-        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
-
-        {score !== undefined && (
-          <div className={cn(
-            "absolute top-2 left-2 w-7 h-7 rounded-full border flex items-center justify-center text-[10px] font-bold backdrop-blur-sm bg-black/40",
-            score >= 70 ? "border-emerald-500/60" : score >= 55 ? "border-amber-500/60" : "border-red-500/60"
-          )}>
-            <span className={getDealScoreColor(score)}>{score}</span>
-          </div>
-        )}
 
         <button
           onClick={handleBookmark}
-          className="absolute top-2 right-2 w-7 h-7 rounded-full flex items-center justify-center backdrop-blur-sm bg-black/40 border border-white/10 hover:border-white/30 transition-colors"
+          className="absolute top-2.5 right-2.5 w-7 h-7 rounded-md border border-white/10 bg-black/55 flex items-center justify-center text-white/70 hover:border-white/30 transition-colors"
         >
           {saved ? (
             <BookmarkCheck className="w-3.5 h-3.5 text-primary" />
           ) : (
-            <Bookmark className="w-3.5 h-3.5 text-white/70" />
+            <Bookmark className="w-3.5 h-3.5" />
           )}
         </button>
 
-        <div className="absolute bottom-2 left-2">
-          <span className="text-white font-bold text-sm drop-shadow-lg">
-            {formatPrice(property.price)}
-            {property.listingType === "for_rent" && (
-              <span className="text-white/70 font-normal text-xs">/mo</span>
-            )}
-          </span>
-        </div>
+        {score !== undefined && (
+          <div className={cn(
+            "absolute bottom-2.5 right-2.5 rounded-md bg-black/65 px-1.5 py-0.5 text-[10px] font-bold",
+            getDealScoreColor(score)
+          )}>
+            +{score}
+          </div>
+        )}
       </div>
 
-      <div className="px-3 py-2.5">
-        <div className="flex items-center justify-between gap-2">
-          <h4 className="text-sm font-semibold truncate">{property.location.address}</h4>
+      <div className="px-3 py-2.5 space-y-1">
+        <div className="flex items-start justify-between gap-2">
+          <h4 className="text-sm font-semibold truncate text-white">{property.location.address}</h4>
           {yoyChange !== undefined && (
             <span className={cn(
               "text-[11px] font-medium shrink-0",
@@ -101,7 +87,7 @@ function CompactPropertyCard({ property, isSelected, onSelect }: CompactProperty
             </span>
           )}
         </div>
-        <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+        <p className="text-[11px] text-white/45 truncate">
           {property.location.city}, {property.location.state} {property.location.zip} · {formatSqft(property.details.sqft)} · {property.details.propertyType.replace(/_/g, " ")}
         </p>
       </div>

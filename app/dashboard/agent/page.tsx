@@ -266,6 +266,52 @@ export default function AgentPage() {
 
   const micBusy = voiceState !== "idle";
 
+  function ChatComposer({ placeholder }: { placeholder: string }) {
+    return (
+      <div className="max-w-2xl mx-auto flex gap-2 items-end w-full">
+        <Textarea
+          ref={inputRef}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder={placeholder}
+          className="resize-none min-h-11 max-h-32 flex-1"
+          rows={1}
+        />
+
+        <Button
+          onClick={toggleRecording}
+          disabled={voiceState === "transcribing" || isLoading}
+          variant={voiceState === "recording" ? "destructive" : "outline"}
+          size="icon"
+          className={cn("shrink-0 relative", voiceState === "recording" && "animate-pulse")}
+          title={voiceState === "recording" ? "Stop recording" : "Record voice message"}
+        >
+          {voiceState === "transcribing" ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : voiceState === "recording" ? (
+            <MicOff className="w-4 h-4" />
+          ) : (
+            <Mic className="w-4 h-4" />
+          )}
+        </Button>
+
+        <Button
+          onClick={() => sendMessage()}
+          disabled={!input.trim() || isLoading}
+          size="icon"
+          className="shrink-0"
+        >
+          {isLoading ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Send className="w-4 h-4" />
+          )}
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 flex overflow-hidden">
       <AgentPropertySidebar
@@ -285,7 +331,7 @@ export default function AgentPage() {
 
         {!selectedProperty ? (
           /* ---- Empty state with active mic ---- */
-          <div className="flex-1 flex flex-col items-center justify-center gap-5 px-6">
+          <div className="flex-1 flex flex-col items-center gap-5 px-6 pt-16">
             <button
               onClick={toggleRecording}
               disabled={voiceState === "transcribing"}
@@ -332,6 +378,10 @@ export default function AgentPage() {
                 </>
               )}
             </div>
+
+            <div className="w-full max-w-2xl pt-2">
+              <ChatComposer placeholder="Ask about a property or market..." />
+            </div>
           </div>
         ) : (
           /* ---- Chat area ---- */
@@ -364,6 +414,11 @@ export default function AgentPage() {
                           {prompt}
                         </button>
                       ))}
+                    </div>
+                    <div className="pt-5">
+                      <ChatComposer
+                        placeholder={`Ask about ${selectedProperty.location.neighborhood}...`}
+                      />
                     </div>
                   </div>
                 )}
@@ -455,55 +510,11 @@ export default function AgentPage() {
               </div>
             </ScrollArea>
 
-            {/* Chat input with mic button */}
-            <div className="border-t border-border p-4 shrink-0">
-              <div className="max-w-2xl mx-auto flex gap-2 items-end">
-                <Textarea
-                  ref={inputRef}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder={`Ask about ${selectedProperty.location.neighborhood}...`}
-                  className="resize-none min-h-11 max-h-32 flex-1"
-                  rows={1}
-                />
-
-                {/* Mic button */}
-                <Button
-                  onClick={toggleRecording}
-                  disabled={voiceState === "transcribing" || isLoading}
-                  variant={voiceState === "recording" ? "destructive" : "outline"}
-                  size="icon"
-                  className={cn(
-                    "shrink-0 relative",
-                    voiceState === "recording" && "animate-pulse"
-                  )}
-                  title={voiceState === "recording" ? "Stop recording" : "Record voice message"}
-                >
-                  {voiceState === "transcribing" ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : voiceState === "recording" ? (
-                    <MicOff className="w-4 h-4" />
-                  ) : (
-                    <Mic className="w-4 h-4" />
-                  )}
-                </Button>
-
-                {/* Send button */}
-                <Button
-                  onClick={() => sendMessage()}
-                  disabled={!input.trim() || isLoading}
-                  size="icon"
-                  className="shrink-0"
-                >
-                  {isLoading ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Send className="w-4 h-4" />
-                  )}
-                </Button>
+            {messages.length > 0 && (
+              <div className="border-t border-border p-4 shrink-0">
+                <ChatComposer placeholder={`Ask about ${selectedProperty.location.neighborhood}...`} />
               </div>
-            </div>
+            )}
           </>
         )}
       </div>
