@@ -35,7 +35,20 @@ let googleMapsPromise: Promise<GoogleMapsNamespace> | null = null;
 declare global {
   interface Window {
     google?: typeof google;
+    gm_authFailure?: () => void;
   }
+}
+
+let lastAuthFailure: string | null = null;
+
+function registerAuthFailureHandler() {
+  if (typeof window === "undefined") return;
+  if (window.gm_authFailure) return;
+  window.gm_authFailure = () => {
+    lastAuthFailure =
+      "Google rejected the API key (gm_authFailure). Likely causes: Maps JavaScript API not enabled, billing not enabled on the GCP project, or HTTP referrer restrictions block http://localhost:3000/*.";
+    console.error("[google-maps]", lastAuthFailure);
+  };
 }
 
 function isValidGoogleMapsKey(key: string | undefined): key is string {
@@ -52,46 +65,118 @@ function isValidMapId(id: string | undefined): id is string {
   return value.length >= 4;
 }
 
+// Inline bootstrap loader from Google Maps docs (slightly adapted).
+// This is what defines google.maps.importLibrary; a plain <script src="...&loading=async">
+// tag does NOT expose importLibrary on its own.
+function installInlineBootstrap(apiKey: string) {
+  if (typeof window === "undefined") return;
+  if (window.google?.maps?.importLibrary) return;
+
+  const existingMarker = document.getElementById(SCRIPT_ID);
+  if (existingMarker) return;
+
+  const marker = document.createElement("script");
+  marker.id = SCRIPT_ID;
+  marker.type = "text/plain";
+  document.head.appendChild(marker);
+
+  ((g: { key: string; v: string; libraries?: string }) => {
+    const win = window as unknown as Record<string, unknown>;
+    const c = "google";
+    const l = "importLibrary";
+    const q = "__ib__";
+    const m = document;
+    const b = (win[c] = (win[c] ?? {}) as Record<string, unknown>);
+    const d = (b.maps = (b.maps ?? {}) as Record<string, unknown>);
+    const r = new Set<string>();
+    const e = new URLSearchParams();
+    let h: Promise<void> | undefined;
+    const u = () =>
+      h ||
+      (h = new Promise<void>((f, n) => {
+        const a = m.createElement("script");
+        e.set("libraries", [...r].join(","));
+        for (const k in g) {
+          const value = (g as unknown as Record<string, string>)[k];
+          e.set(k.replace(/[A-Z]/g, (t) => "_" + t.toLowerCase()), value);
+        }
+        e.set("callback", `${c}.maps.${q}`);
+        a.src = `https://maps.${c}apis.com/maps/api/js?` + e.toString();
+        (d as Record<string, unknown>)[q] = f;
+        a.onerror = () => {
+          h = undefined;
+          n(new Error("Google Maps JavaScript API could not load."));
+        };
+        a.nonce = (m.querySelector("script[nonce]") as HTMLScriptElement | null)?.nonce ?? "";
+        m.head.append(a);
+      }));
+    if ((d as Record<string, unknown>)[l]) {
+      console.warn("Google Maps JavaScript API only loads once. Ignoring:", g);
+    } else {
+      (d as Record<string, unknown>)[l] = (
+        f: string,
+        ...n: unknown[]
+      ) =>
+        r.add(f) &&
+        u().then(() =>
+          (
+            (d as Record<string, unknown>)[l] as (
+              f: string,
+              ...n: unknown[]
+            ) => unknown
+          )(f, ...n)
+        );
+    }
+  })({ key: apiKey, v: "weekly" });
+}
+
 function ensureGoogleMaps(apiKey: string): Promise<GoogleMapsNamespace> {
   if (typeof window === "undefined") {
     return Promise.reject(new Error("Google Maps requires a browser environment"));
   }
 
-  if (window.google?.maps) {
+  registerAuthFailureHandler();
+
+  if (window.google?.maps?.Map) {
     return Promise.resolve(window.google.maps);
   }
 
   if (googleMapsPromise) return googleMapsPromise;
 
-  googleMapsPromise = new Promise((resolve, reject) => {
-    const existing = document.getElementById(SCRIPT_ID) as HTMLScriptElement | null;
-    const onReady = () => {
-      if (window.google?.maps) {
-        resolve(window.google.maps);
-      } else {
-        reject(new Error("Google Maps script loaded without exposing google.maps"));
-      }
-    };
+  installInlineBootstrap(apiKey);
 
-    if (existing) {
-      existing.addEventListener("load", onReady, { once: true });
-      existing.addEventListener("error", () => reject(new Error("Failed to load Google Maps")), {
-        once: true,
-      });
-      return;
+  const importLibrary = window.google?.maps?.importLibrary as
+    | ((name: string) => Promise<unknown>)
+    | undefined;
+
+  if (!importLibrary) {
+    return Promise.reject(
+      new Error(
+        "Failed to install the Google Maps inline bootstrap (importLibrary is missing)."
+      )
+    );
+  }
+
+  googleMapsPromise = (async () => {
+    try {
+      await Promise.all([importLibrary("maps"), importLibrary("marker")]);
+    } catch (err) {
+      // Reset so a retry (e.g. via HMR) can try again.
+      googleMapsPromise = null;
+      throw err instanceof Error
+        ? err
+        : new Error(
+            "Google Maps importLibrary failed — likely an auth failure (check the browser console for the Google Maps error code)."
+          );
     }
-
-    const script = document.createElement("script");
-    script.id = SCRIPT_ID;
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&v=weekly&libraries=marker&loading=async`;
-    script.async = true;
-    script.defer = true;
-    script.addEventListener("load", onReady, { once: true });
-    script.addEventListener("error", () => reject(new Error("Failed to load Google Maps")), {
-      once: true,
-    });
-    document.head.appendChild(script);
-  });
+    if (!window.google?.maps?.Map) {
+      googleMapsPromise = null;
+      throw new Error(
+        "Google Maps loaded but the Map constructor is unavailable. Check the browser console for the Google Maps error code (auth, billing, or referrer)."
+      );
+    }
+    return window.google.maps;
+  })();
 
   return googleMapsPromise;
 }
@@ -353,11 +438,15 @@ export function GoogleMap({ properties, selectedId, onSelectProperty }: GoogleMa
         updateMarkers();
         fitToProperties();
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (cancelled || !containerRef.current) return;
+        const reason =
+          lastAuthFailure ??
+          (error instanceof Error ? error.message : "Unknown error loading Google Maps.");
+        console.error("[google-maps] failed to load", error);
         showMapPlaceholder(
           containerRef.current,
-          "Google Maps could not be loaded. Check the API key and that the Maps JavaScript API is enabled.",
+          `Google Maps could not be loaded. ${reason} Open DevTools → Console for the full Google error code (e.g. ApiNotActivatedMapError, BillingNotEnabledMapError, RefererNotAllowedMapError, InvalidKeyMapError).`,
           properties.length
         );
       });
