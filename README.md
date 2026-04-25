@@ -21,7 +21,7 @@ Open [http://localhost:3000](http://localhost:3000)
 | Framework | Next.js 16 App Router + TypeScript |
 | UI | Tailwind CSS v4 + shadcn/ui (dark, new-york) |
 | State | Zustand (persisted) |
-| Maps | Mapbox GL JS |
+| Maps | Google Maps JavaScript API |
 | AI (search + analysis) | Gemini 2.0 Flash + OpenAI GPT-4o-mini |
 | Reports | Server-side HTML generation |
 | Data | SQLite-backed listing/session cache seeded from demo properties |
@@ -30,7 +30,7 @@ Open [http://localhost:3000](http://localhost:3000)
 
 ### Phase 1 (live)
 - **Onboarding wizard** — buyer preferences, budget range, neighborhood selection, must-haves
-- **Interactive map** — Mapbox GL with property pins color-coded by Deal Score (shows map placeholder without token)
+- **Interactive map** — Google Maps with custom price markers color-coded by Deal Score (shows map placeholder without an API key)
 - **Property list** — filterable by price, beds, baths, and type
 - **Property detail panel** — full stats, Deal Score breakdown, risk profile, financial overview
 
@@ -46,8 +46,12 @@ Open [http://localhost:3000](http://localhost:3000)
 ## Environment Variables
 
 ```env
-# Required for live map
-NEXT_PUBLIC_MAPBOX_TOKEN=
+# Required for live map (Google Maps JavaScript API)
+NEXT_PUBLIC_GOOGLE_MAPS_KEY=
+# Optional: required for true 3D buildings + tilt/heading. Create a Map ID in
+# Google Cloud Console → Map Management with the Vector renderer enabled.
+# Without it, the 3D toggle falls back to tilted satellite imagery.
+NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID=
 
 # Required for AI features (at least one)
 GEMINI_API_KEY=
@@ -75,7 +79,7 @@ app/
   api/report/        # Report generation endpoint
 components/
   layout/            # Nav bar
-  map/               # Mapbox map + filters + search view
+  map/               # Google Maps view + filters + search view
   property/          # Property cards, detail panel, saved view
   compare/           # Side-by-side comparison table
   assistant/         # Chat UI

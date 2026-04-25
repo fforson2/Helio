@@ -72,7 +72,7 @@ body {
 }
 
 /* Map container reset */
-.mapboxgl-map {
+.gm-style {
   font-family: var(--font-sans) !important;
 }
 
