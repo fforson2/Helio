@@ -1,15 +1,15 @@
 "use client";
 
-import { useUIStore, usePropertyStore, useUserStore } from "@/lib/store";
+import { useUserStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
 import {
   Map,
-  List,
-  Columns3,
   MessageSquare,
+  Compass,
+  Search,
   FileText,
-  Bookmark,
+  LayoutDashboard,
+  ChartNetwork,
   Home,
   User,
   Settings,
@@ -22,22 +22,23 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 
 const NAV_TABS = [
-  { id: "map", label: "Map", icon: Map },
-  { id: "list", label: "List", icon: List },
-  { id: "compare", label: "Compare", icon: Columns3 },
-  { id: "assistant", label: "Assistant", icon: MessageSquare },
-  { id: "reports", label: "Reports", icon: FileText },
-  { id: "saved", label: "Saved", icon: Bookmark },
+  { id: "map", label: "Map", icon: Map, href: "/dashboard/map" },
+  { id: "agent", label: "Agent", icon: MessageSquare, href: "/dashboard/agent" },
+  { id: "tour", label: "Tour", icon: Compass, href: "/dashboard/tour" },
+  { id: "search", label: "Search", icon: Search, href: "/dashboard/search" },
+  { id: "report", label: "Report", icon: FileText, href: "/dashboard/report" },
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
+  { id: "graph", label: "Graph", icon: ChartNetwork, href: "/dashboard/graph" },
 ] as const;
 
 export function DashboardNav() {
-  const { activeTab, setActiveTab } = useUIStore();
-  const { comparisonIds, savedProperties } = usePropertyStore();
   const { profile } = useUserStore();
   const router = useRouter();
+  const pathname = usePathname();
 
   return (
     <header className="h-14 border-b border-border flex items-center px-4 gap-4 bg-card/50 backdrop-blur-sm sticky top-0 z-50">
@@ -58,19 +59,15 @@ export function DashboardNav() {
 
       {/* Tabs */}
       <nav className="flex items-center gap-1 flex-1">
-        {NAV_TABS.map(({ id, label, icon: Icon }) => {
-          const isActive = activeTab === id;
-          const badge =
-            id === "compare"
-              ? comparisonIds.length
-              : id === "saved"
-              ? savedProperties.length
-              : 0;
+        {NAV_TABS.map(({ id, label, icon: Icon, href }) => {
+          const isActive =
+            (id === "dashboard" && pathname === "/dashboard") ||
+            (id !== "dashboard" && pathname?.startsWith(href));
 
           return (
-            <button
+            <Link
               key={id}
-              onClick={() => setActiveTab(id)}
+              href={href}
               className={cn(
                 "relative flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all",
                 isActive
@@ -80,19 +77,7 @@ export function DashboardNav() {
             >
               <Icon className="w-3.5 h-3.5" />
               <span className="hidden md:block">{label}</span>
-              {badge > 0 && (
-                <span
-                  className={cn(
-                    "absolute -top-1 -right-1 w-4 h-4 rounded-full text-[10px] flex items-center justify-center font-bold",
-                    isActive
-                      ? "bg-background text-foreground"
-                      : "bg-primary text-primary-foreground"
-                  )}
-                >
-                  {badge}
-                </span>
-              )}
-            </button>
+            </Link>
           );
         })}
       </nav>
