@@ -5,7 +5,6 @@ import { useChatStore, usePropertyStore, useUserStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Send, Sparkles, Bot, User, MapPin, Loader2, Volume2, Square } from "lucide-react";
 import { formatPrice } from "@/lib/format";
@@ -20,7 +19,7 @@ const QUICK_PROMPTS = [
 
 export function AssistantView() {
   const { messages, isLoading, addMessage, setLoading } = useChatStore();
-  const { properties, savedProperties } = usePropertyStore();
+  const { properties, savedProperties, activeSearchSessionId, selectedPropertyId } = usePropertyStore();
   const { profile } = useUserStore();
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -38,7 +37,6 @@ export function AssistantView() {
 
   useEffect(() => {
     return () => {
-      // Revoke any blob URLs we created
       for (const url of Object.values(ttsCache)) URL.revokeObjectURL(url);
       if (audioRef.current) {
         audioRef.current.pause();
@@ -51,7 +49,6 @@ export function AssistantView() {
   async function playTTS(messageId: string, text: string) {
     if (!text.trim()) return;
 
-    // Toggle stop if the same message is playing
     if (ttsPlayingId === messageId && audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
@@ -59,7 +56,6 @@ export function AssistantView() {
       return;
     }
 
-    // Stop any current audio
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
@@ -104,18 +100,15 @@ export function AssistantView() {
 
     setLoading(true);
     try {
-      const savedProps = savedProperties
-        .map((s) => properties.find((p) => p.id === s.propertyId))
-        .filter(Boolean);
-
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: [...messages, { role: "user", content }],
           context: {
-            properties: properties.slice(0, 8),
-            savedProperties: savedProps,
+            searchSessionId: activeSearchSessionId,
+            selectedPropertyId,
+            savedPropertyIds: savedProperties.map((saved) => saved.propertyId),
             userPreferences: profile?.preferences,
             userName: profile?.name,
           },
@@ -130,7 +123,7 @@ export function AssistantView() {
       addMessage({
         role: "assistant",
         content:
-          "I'm having trouble connecting right now. Please check that your OPENAI_API_KEY or GROQ_API_KEY is configured in .env.local, then try again.",
+          "I'm having trouble connecting right now. Please check that your GEMINI_API_KEY or OPENAI_API_KEY is configured in .env.local, then try again.",
       });
     } finally {
       setLoading(false);
@@ -146,7 +139,6 @@ export function AssistantView() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Header */}
       <div className="border-b border-border p-4 flex items-center gap-3">
         <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/30 flex items-center justify-center">
           <Sparkles className="w-4 h-4 text-primary" />
@@ -154,7 +146,7 @@ export function AssistantView() {
         <div>
           <h2 className="font-semibold">Helio AI</h2>
           <p className="text-xs text-muted-foreground">
-            Ask anything about properties, neighborhoods, or deals
+            Ask anything about your active search, neighborhoods, or tradeoffs
           </p>
         </div>
         <div className="ml-auto flex items-center gap-1.5">
@@ -163,12 +155,10 @@ export function AssistantView() {
         </div>
       </div>
 
-      {/* Messages */}
       <ScrollArea className="flex-1 p-4" ref={scrollRef as React.RefObject<HTMLDivElement>}>
         <div className="space-y-4 max-w-3xl mx-auto">
           {messages.length === 0 && (
             <div className="space-y-6">
-              {/* Welcome */}
               <div className="text-center py-8 space-y-3">
                 <div className="w-16 h-16 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto">
                   <Sparkles className="w-8 h-8 text-primary" />
@@ -177,32 +167,30 @@ export function AssistantView() {
                   Hi{profile?.name ? `, ${profile.name.split(" ")[0]}` : ""}! I'm Helio AI
                 </h3>
                 <p className="text-muted-foreground max-w-sm mx-auto text-sm">
-                  I know every property in your search, your preferences, and the U.S. market. Ask me anything.
+                  I can explain the active search, compare deals, and call out neighborhood strengths and risks.
                 </p>
               </div>
 
-              {/* Property context pills */}
               {properties.length > 0 && (
                 <div className="space-y-2">
                   <p className="text-xs text-muted-foreground text-center">
-                    I'm tracking {properties.length} properties
+                    Grounded in {properties.length} active search results
                   </p>
                   <div className="flex flex-wrap gap-2 justify-center">
-                    {properties.slice(0, 4).map((p) => (
+                    {properties.slice(0, 4).map((property) => (
                       <div
-                        key={p.id}
+                        key={property.id}
                         className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-secondary border border-border text-xs"
                       >
                         <MapPin className="w-3 h-3 text-muted-foreground" />
-                        <span className="text-muted-foreground">{p.location.neighborhood}</span>
-                        <span className="font-medium">{formatPrice(p.price)}</span>
+                        <span className="text-muted-foreground">{property.location.neighborhood}</span>
+                        <span className="font-medium">{formatPrice(property.price)}</span>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
 
-              {/* Quick prompts */}
               <div className="space-y-2">
                 <p className="text-xs text-muted-foreground text-center">Try asking:</p>
                 <div className="grid grid-cols-1 gap-2">
@@ -225,10 +213,7 @@ export function AssistantView() {
           {messages.map((message) => (
             <div
               key={message.id}
-              className={cn(
-                "flex gap-3",
-                message.role === "user" ? "flex-row-reverse" : "flex-row"
-              )}
+              className={cn("flex gap-3", message.role === "user" ? "flex-row-reverse" : "flex-row")}
             >
               <div
                 className={cn(
@@ -262,7 +247,7 @@ export function AssistantView() {
                       className={cn(
                         "inline-flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-md border transition-colors",
                         "border-border hover:bg-muted/60",
-                        (ttsLoadingId === message.id) && "opacity-70 cursor-not-allowed"
+                        ttsLoadingId === message.id && "opacity-70 cursor-not-allowed"
                       )}
                       aria-label="Play voice"
                     >
@@ -275,9 +260,7 @@ export function AssistantView() {
                       )}
                       <span>{ttsPlayingId === message.id ? "Stop" : "Speak"}</span>
                     </button>
-                    <span className="text-[10px] text-muted-foreground">
-                      Voice via ElevenLabs
-                    </span>
+                    <span className="text-[10px] text-muted-foreground">Voice via ElevenLabs</span>
                   </div>
                 )}
                 <div
@@ -313,7 +296,6 @@ export function AssistantView() {
         </div>
       </ScrollArea>
 
-      {/* Input */}
       <div className="border-t border-border p-4">
         <div className="max-w-3xl mx-auto flex gap-2 items-end">
           <Textarea
@@ -325,21 +307,12 @@ export function AssistantView() {
             className="resize-none min-h-11 max-h-32 flex-1"
             rows={1}
           />
-          <Button
-            onClick={() => sendMessage()}
-            disabled={!input.trim() || isLoading}
-            size="icon"
-            className="shrink-0"
-          >
-            {isLoading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Send className="w-4 h-4" />
-            )}
+          <Button onClick={() => sendMessage()} disabled={!input.trim() || isLoading} size="icon" className="shrink-0">
+            {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
           </Button>
         </div>
         <p className="text-center text-[10px] text-muted-foreground mt-2">
-          Powered by AI · Add OPENAI_API_KEY or GROQ_API_KEY to .env.local
+          Powered by AI · Add GEMINI_API_KEY or OPENAI_API_KEY to .env.local
         </p>
       </div>
     </div>

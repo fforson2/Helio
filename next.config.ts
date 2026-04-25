@@ -7,7 +7,7 @@ const nextConfig: NextConfig = {
       { hostname: "api.mapbox.com" },
     ],
   },
-  serverExternalPackages: ["jspdf"],
+  serverExternalPackages: ["jspdf", "better-sqlite3"],
 };
 
 export default nextConfig;

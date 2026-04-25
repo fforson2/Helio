@@ -3,18 +3,33 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { Property, SavedProperty } from "@/types/property";
+import { SearchFilters, SearchSession } from "@/types/search";
 import { BuyerPreferences, UserProfile } from "@/types/user";
 import { ChatMessage } from "@/types/session";
 
 interface PropertyStore {
   properties: Property[];
-  filteredIds: string[];
+  propertyMap: Record<string, Property>;
+  activeSearchSessionId: string | null;
+  searchSummary: string;
+  searchQuery: string;
   selectedPropertyId: string | null;
   savedProperties: SavedProperty[];
   comparisonIds: string[];
-  filters: Partial<BuyerPreferences>;
-  setProperties: (props: Property[]) => void;
-  setFilteredIds: (ids: string[]) => void;
+  filters: SearchFilters;
+  isSearching: boolean;
+  searchError: string | null;
+  setSearchResults: (payload: {
+    properties: Property[];
+    session?: SearchSession | null;
+    query?: string;
+    filters?: SearchFilters;
+    summary?: string;
+  }) => void;
+  setSearchQuery: (query: string) => void;
+  setSearching: (searching: boolean) => void;
+  setSearchError: (message: string | null) => void;
+  setFilters: (filters: SearchFilters) => void;
   selectProperty: (id: string | null) => void;
   saveProperty: (id: string, notes?: string) => void;
   unsaveProperty: (id: string) => void;
@@ -22,21 +37,48 @@ interface PropertyStore {
   addToComparison: (id: string) => void;
   removeFromComparison: (id: string) => void;
   clearComparison: () => void;
-  setFilters: (filters: Partial<BuyerPreferences>) => void;
 }
 
 export const usePropertyStore = create<PropertyStore>()(
   persist(
     (set, get) => ({
       properties: [],
-      filteredIds: [],
+      propertyMap: {},
+      activeSearchSessionId: null,
+      searchSummary: "",
+      searchQuery: "",
       selectedPropertyId: null,
       savedProperties: [],
       comparisonIds: [],
       filters: {},
-      setProperties: (props) =>
-        set({ properties: props, filteredIds: props.map((p) => p.id) }),
-      setFilteredIds: (ids) => set({ filteredIds: ids }),
+      isSearching: false,
+      searchError: null,
+      setSearchResults: ({ properties, session, query, filters, summary }) =>
+        set((state) => {
+          const propertyMap = { ...state.propertyMap };
+          for (const property of properties) {
+            propertyMap[property.id] = property;
+          }
+
+          const selectedStillExists = state.selectedPropertyId
+            ? propertyMap[state.selectedPropertyId]
+            : null;
+
+          return {
+            properties,
+            propertyMap,
+            activeSearchSessionId: session?.id ?? state.activeSearchSessionId,
+            searchSummary: summary ?? session?.summary ?? state.searchSummary,
+            searchQuery: query ?? session?.query ?? state.searchQuery,
+            filters: filters ?? session?.filters ?? state.filters,
+            selectedPropertyId: selectedStillExists ? state.selectedPropertyId : null,
+            searchError: null,
+          };
+        }),
+      setSearchQuery: (query) => set({ searchQuery: query }),
+      setSearching: (searching) => set({ isSearching: searching }),
+      setSearchError: (message) => set({ searchError: message }),
+      setFilters: (filters) => set({ filters }),
       selectProperty: (id) => set({ selectedPropertyId: id }),
       saveProperty: (id, notes) => {
         const existing = get().savedProperties.find((s) => s.propertyId === id);
@@ -51,12 +93,9 @@ export const usePropertyStore = create<PropertyStore>()(
       },
       unsaveProperty: (id) =>
         set((state) => ({
-          savedProperties: state.savedProperties.filter(
-            (s) => s.propertyId !== id
-          ),
+          savedProperties: state.savedProperties.filter((s) => s.propertyId !== id),
         })),
-      isPropertySaved: (id) =>
-        get().savedProperties.some((s) => s.propertyId === id),
+      isPropertySaved: (id) => get().savedProperties.some((s) => s.propertyId === id),
       addToComparison: (id) => {
         const { comparisonIds } = get();
         if (comparisonIds.length >= 3 || comparisonIds.includes(id)) return;
@@ -67,7 +106,6 @@ export const usePropertyStore = create<PropertyStore>()(
           comparisonIds: state.comparisonIds.filter((cid) => cid !== id),
         })),
       clearComparison: () => set({ comparisonIds: [] }),
-      setFilters: (filters) => set({ filters }),
     }),
     {
       name: "helio-property-store",
@@ -75,6 +113,7 @@ export const usePropertyStore = create<PropertyStore>()(
         savedProperties: state.savedProperties,
         comparisonIds: state.comparisonIds,
         filters: state.filters,
+        searchQuery: state.searchQuery,
       }),
     }
   )

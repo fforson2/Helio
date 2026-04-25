@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { usePropertyStore } from "@/lib/store";
+import { useEffect, useMemo, useState } from "react";
+import { usePropertyStore, useUserStore } from "@/lib/store";
 import { PropertyCard } from "@/components/property/property-card";
 import { PropertyDetailPanel } from "@/components/property/property-detail-panel";
 import { MapFilters } from "@/components/map/map-filters";
@@ -9,152 +9,236 @@ import { MapboxMap } from "@/components/map/mapbox-map";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { SlidersHorizontal, X } from "lucide-react";
-import { filterProperties } from "@/lib/demo-properties";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { inferSearchIntent, searchListings } from "@/lib/search-client";
+import { Loader2, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
 
 interface MapSearchViewProps {
   listOnly?: boolean;
 }
 
+function hasActiveFilters(filters: ReturnType<typeof usePropertyStore.getState>["filters"]) {
+  return Boolean(
+    filters.minPrice ||
+      filters.maxPrice ||
+      filters.minBeds ||
+      filters.minBaths ||
+      (filters.propertyTypes && filters.propertyTypes.length > 0) ||
+      (filters.targetNeighborhoods && filters.targetNeighborhoods.length > 0) ||
+      (filters.mustHaves && filters.mustHaves.length > 0)
+  );
+}
+
 export function MapSearchView({ listOnly = false }: MapSearchViewProps) {
+  const { profile } = useUserStore();
   const {
     properties,
-    filteredIds,
-    setFilteredIds,
+    propertyMap,
     selectedPropertyId,
     selectProperty,
     filters,
     setFilters,
+    setSearchResults,
+    searchQuery,
+    searchSummary,
+    setSearchQuery,
+    isSearching,
+    setSearching,
+    searchError,
+    setSearchError,
   } = usePropertyStore();
 
   const [showFilters, setShowFilters] = useState(false);
+  const [prompt, setPrompt] = useState(searchQuery);
 
-  const filteredProperties = properties.filter((p) =>
-    filteredIds.includes(p.id)
-  );
-  const selectedProperty = properties.find(
-    (p) => p.id === selectedPropertyId
-  );
+  const selectedProperty = selectedPropertyId ? propertyMap[selectedPropertyId] ?? null : null;
+  const activeFilters = hasActiveFilters(filters);
 
   useEffect(() => {
-    const filtered = filterProperties(properties, {
-      minPrice: filters.minPrice,
-      maxPrice: filters.maxPrice,
-      minBeds: filters.minBeds,
-      minBaths: filters.minBaths,
-      propertyTypes: filters.propertyTypes,
-      listingType: filters.listingType,
-    });
-    setFilteredIds(filtered.map((p) => p.id));
-  }, [properties, filters, setFilteredIds]);
+    setPrompt(searchQuery);
+  }, [searchQuery]);
 
-  const hasActiveFilters =
-    filters.minPrice ||
-    filters.maxPrice ||
-    filters.minBeds ||
-    (filters.propertyTypes && filters.propertyTypes.length > 0);
+  useEffect(() => {
+    if (!searchQuery && properties.length === 0) return;
+
+    const controller = new AbortController();
+    setSearching(true);
+    searchListings({
+      query: searchQuery || searchSummary,
+      summary: searchSummary || "Filtered homes",
+      filters,
+    })
+      .then((response) => {
+        if (controller.signal.aborted) return;
+        setSearchResults({
+          properties: response.properties,
+          session: response.session,
+          query: searchQuery || response.session.query,
+          filters,
+        });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setSearchError("Could not refresh listings for the selected filters.");
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setSearching(false);
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [filters, properties.length, searchQuery, searchSummary, setSearchError, setSearchResults, setSearching]);
+
+  async function runPromptSearch() {
+    const query = prompt.trim();
+    if (!query || isSearching) return;
+
+    setSearching(true);
+    setSearchError(null);
+    try {
+      const intent = await inferSearchIntent(query, profile?.preferences);
+      const response = await searchListings({
+        query,
+        summary: intent.summary,
+        filters: intent.filters,
+      });
+
+      setFilters(intent.filters);
+      setSearchQuery(query);
+      setSearchResults({
+        properties: response.properties,
+        session: response.session,
+        query,
+        filters: intent.filters,
+        summary: intent.summary,
+      });
+    } catch {
+      setSearchError("Could not run that search right now.");
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  const emptyMessage = useMemo(() => {
+    if (isSearching) return "Searching homes...";
+    if (searchError) return searchError;
+    return "No properties match your current search.";
+  }, [isSearching, searchError]);
 
   return (
     <div className="flex-1 flex overflow-hidden relative">
-      {/* Left sidebar: property list */}
       <div
         className={cn(
           "flex flex-col border-r border-border bg-card/30",
           listOnly ? "w-full" : "w-96 shrink-0"
         )}
       >
-        {/* Toolbar */}
-        <div className="p-3 border-b border-border flex items-center gap-2">
-          <div className="flex-1">
-            <span className="text-sm font-medium">
-              {filteredProperties.length} properties
-            </span>
-            {hasActiveFilters && (
-              <span className="ml-2 text-xs text-muted-foreground">
-                · filtered
-              </span>
+        <div className="p-3 border-b border-border space-y-3">
+          <div className="flex items-start gap-2">
+            <div className="flex-1 space-y-1">
+              <span className="text-sm font-medium">{properties.length} properties</span>
+              <div className="text-xs text-muted-foreground line-clamp-2">
+                {searchSummary || "Search properties by prompt or filters."}
+              </div>
+            </div>
+            <Button
+              variant={showFilters ? "default" : "outline"}
+              size="sm"
+              className="gap-1.5"
+              onClick={() => setShowFilters(!showFilters)}
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              Filters
+              {activeFilters && (
+                <Badge className="w-4 h-4 p-0 flex items-center justify-center text-[10px] ml-0.5">
+                  !
+                </Badge>
+              )}
+            </Button>
+            {activeFilters && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setFilters({})}
+                className="w-8 h-8 p-0"
+              >
+                <X className="w-3.5 h-3.5" />
+              </Button>
             )}
           </div>
-          <Button
-            variant={showFilters ? "default" : "outline"}
-            size="sm"
-            className="gap-1.5"
-            onClick={() => setShowFilters(!showFilters)}
-          >
-            <SlidersHorizontal className="w-3.5 h-3.5" />
-            Filters
-            {hasActiveFilters && (
-              <Badge className="w-4 h-4 p-0 flex items-center justify-center text-[10px] ml-0.5">
-                !
-              </Badge>
-            )}
-          </Button>
-          {hasActiveFilters && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setFilters({})}
-              className="w-8 h-8 p-0"
-            >
-              <X className="w-3.5 h-3.5" />
+
+          <div className="flex gap-2">
+            <Input
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  runPromptSearch();
+                }
+              }}
+              placeholder="Describe the home you want..."
+              className="h-9"
+            />
+            <Button onClick={runPromptSearch} disabled={isSearching || !prompt.trim()} className="gap-2">
+              {isSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              Search
             </Button>
+          </div>
+
+          {searchQuery && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Search className="w-3 h-3" />
+              <span className="truncate">{searchQuery}</span>
+            </div>
           )}
         </div>
 
-        {/* Filters panel */}
         {showFilters && (
           <div className="border-b border-border">
-            <MapFilters
-              filters={filters}
-              onChange={setFilters}
-              onClose={() => setShowFilters(false)}
-            />
+            <MapFilters filters={filters} onChange={setFilters} onClose={() => setShowFilters(false)} />
           </div>
         )}
 
-        {/* Property list */}
         <ScrollArea className="flex-1">
           <div className="p-3 space-y-3">
-            {filteredProperties.length === 0 && (
-              <div className="py-12 text-center text-muted-foreground">
-                <p className="font-medium">No properties match your filters</p>
-                <button
-                  onClick={() => setFilters({})}
-                  className="text-primary text-sm mt-2 hover:underline"
-                >
-                  Clear filters
-                </button>
+            {properties.length === 0 && (
+              <div className="py-12 text-center text-muted-foreground space-y-2">
+                {isSearching ? (
+                  <Loader2 className="w-5 h-5 animate-spin mx-auto" />
+                ) : null}
+                <p className="font-medium">{emptyMessage}</p>
+                {!isSearching && (
+                  <button
+                    onClick={() => setFilters({})}
+                    className="text-primary text-sm mt-2 hover:underline"
+                  >
+                    Clear filters
+                  </button>
+                )}
               </div>
             )}
-            {filteredProperties.map((property) => (
+            {properties.map((property) => (
               <PropertyCard
                 key={property.id}
                 property={property}
                 isSelected={property.id === selectedPropertyId}
-                onClick={() =>
-                  selectProperty(
-                    property.id === selectedPropertyId ? null : property.id
-                  )
-                }
+                onClick={() => selectProperty(property.id === selectedPropertyId ? null : property.id)}
               />
             ))}
           </div>
         </ScrollArea>
       </div>
 
-      {/* Map */}
       {!listOnly && (
         <div className="flex-1 relative">
-          <MapboxMap
-            properties={filteredProperties}
-            selectedId={selectedPropertyId}
-            onSelectProperty={selectProperty}
-          />
+          <MapboxMap properties={properties} selectedId={selectedPropertyId} onSelectProperty={selectProperty} />
         </div>
       )}
 
-      {/* Property detail panel */}
       {selectedProperty && (
         <div
           className={cn(
@@ -162,10 +246,7 @@ export function MapSearchView({ listOnly = false }: MapSearchViewProps) {
             listOnly && "absolute right-0 top-0 bottom-0 z-10 shadow-2xl"
           )}
         >
-          <PropertyDetailPanel
-            property={selectedProperty}
-            onClose={() => selectProperty(null)}
-          />
+          <PropertyDetailPanel property={selectedProperty} onClose={() => selectProperty(null)} />
         </div>
       )}
     </div>

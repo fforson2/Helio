@@ -22,10 +22,9 @@ Open [http://localhost:3000](http://localhost:3000)
 | UI | Tailwind CSS v4 + shadcn/ui (dark, new-york) |
 | State | Zustand (persisted) |
 | Maps | Mapbox GL JS |
-| AI (fast) | Groq LLaMA 3.3 70B |
-| AI (rich) | OpenAI GPT-4o-mini |
+| AI (search + analysis) | Gemini 2.0 Flash + OpenAI GPT-4o-mini |
 | Reports | Server-side HTML generation |
-| Data | Demo seed + live APIs optional |
+| Data | SQLite-backed listing/session cache seeded from demo properties |
 
 ## Features
 
@@ -41,8 +40,8 @@ Open [http://localhost:3000](http://localhost:3000)
 - **Saved shortlist** — bookmark properties, accessible from nav
 
 ### Phase 3 (live)
-- **AI Assistant** — chat-based Q&A grounded in actual property data; uses Groq first, falls back to OpenAI
-- **Property reports** — downloadable HTML reports with AI-generated analysis section; graceful fallback without API keys
+- **AI Assistant** — chat-based Q&A grounded in the active search session and neighborhood context; uses Gemini first, falls back to OpenAI
+- **Property reports** — downloadable HTML reports with server-fetched property context and AI-generated analysis
 
 ## Environment Variables
 
@@ -51,16 +50,17 @@ Open [http://localhost:3000](http://localhost:3000)
 NEXT_PUBLIC_MAPBOX_TOKEN=
 
 # Required for AI features (at least one)
-GROQ_API_KEY=         # preferred — faster and free tier
-OPENAI_API_KEY=       # fallback
+GEMINI_API_KEY=
+OPENAI_API_KEY=
+
+# Optional model overrides
+GEMINI_MODEL=gemini-2.0-flash
+OPENAI_MODEL=gpt-4o-mini
 
 # Optional (Text-to-Speech)
 ELEVENLABS_API_KEY=
 ELEVENLABS_VOICE_ID=
 ELEVENLABS_MODEL_ID=eleven_multilingual_v2
-
-# Optional
-OPENAI_MODEL=gpt-4o-mini
 ```
 
 Everything works without API keys — the map shows a placeholder, AI chat returns a formatted demo response, and reports use the listing description as the analysis.
@@ -81,8 +81,10 @@ components/
   assistant/         # Chat UI
   reports/           # Report generation UI
 lib/
-  demo-properties.ts # 8 rich LA properties with full data
+  demo-properties.ts # 8 rich LA properties used to seed SQLite
   deal-score.ts      # Deal Score computation engine
+  search-client.ts   # Client helpers for intent + listing search
+  server/            # SQLite-backed listings/search/AI helpers
   store.ts           # Zustand stores (property, user, chat, UI)
   format.ts          # Display formatters
 types/

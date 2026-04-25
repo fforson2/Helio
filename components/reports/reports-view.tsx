@@ -24,14 +24,14 @@ import { useUIStore } from "@/lib/store";
 import { toast } from "sonner";
 
 export function ReportsView() {
-  const { properties, savedProperties } = usePropertyStore();
+  const { properties, propertyMap, savedProperties, activeSearchSessionId } = usePropertyStore();
   const { profile } = useUserStore();
   const { setActiveTab } = useUIStore();
   const [generating, setGenerating] = useState<string | null>(null);
   const [generated, setGenerated] = useState<Set<string>>(new Set());
 
   const savedProps = savedProperties
-    .map((s) => properties.find((p) => p.id === s.propertyId))
+    .map((s) => propertyMap[s.propertyId] ?? properties.find((p) => p.id === s.propertyId))
     .filter(Boolean) as Property[];
 
   const reportableProps = savedProps.length > 0 ? savedProps : properties.slice(0, 4);
@@ -43,7 +43,8 @@ export function ReportsView() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          property,
+          propertyId: property.id,
+          searchSessionId: activeSearchSessionId,
           userProfile: profile,
         }),
       });
