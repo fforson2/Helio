@@ -35,6 +35,13 @@ interface QuickAction {
   prompt: string;
 }
 
+interface CompareAnalysis {
+  winnerId: string;
+  summary: string;
+  reasons: string[];
+  tradeoffs: string[];
+}
+
 const QUICK_ACTIONS: QuickAction[] = [
   {
     id: "email",
@@ -93,6 +100,11 @@ export function ReportsView() {
   const [generating, setGenerating] = useState(false);
   const [generated, setGenerated] = useState<Set<string>>(new Set());
   const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const [compareAnalysis, setCompareAnalysis] = useState<CompareAnalysis | null>(
+    null
+  );
+  const [compareLoading, setCompareLoading] = useState(false);
+  const [compareError, setCompareError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -128,17 +140,74 @@ export function ReportsView() {
       : activeTab === "compare"
         ? comparedProps
         : activeProperties;
+  const compareRequestKey = JSON.stringify({
+    properties: comparedProps.map((property) => ({
+      id: property.id,
+      updatedAt: property.updatedAt,
+    })),
+    preferences: profile?.preferences ?? null,
+    userName: profile?.name ?? null,
+  });
   const bestComparedProperty =
-    comparedProps.length > 0
-      ? comparedProps.reduce((best, property) =>
-          (property.dealScore?.total ?? -1) > (best.dealScore?.total ?? -1)
-            ? property
-            : best
-        )
+    comparedProps.length >= 2 && compareAnalysis?.winnerId
+      ? comparedProps.find((property) => property.id === compareAnalysis.winnerId) ??
+        null
       : null;
-  const bestComparedReasons = bestComparedProperty
-    ? getBestPropertyReasons(bestComparedProperty, comparedProps)
-    : [];
+  const bestComparedReasons = compareAnalysis?.reasons ?? [];
+  const bestComparedTradeoffs = compareAnalysis?.tradeoffs ?? [];
+
+  useEffect(() => {
+    if (comparedProps.length < 2) {
+      setCompareAnalysis(null);
+      setCompareError(null);
+      setCompareLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setCompareLoading(true);
+    setCompareError(null);
+    setCompareAnalysis(null);
+
+    fetch("/api/compare", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        properties: comparedProps,
+        userPreferences: profile?.preferences,
+        userName: profile?.name,
+      }),
+    })
+      .then(async (response) => {
+        const data = (await response.json()) as CompareAnalysis & {
+          error?: string;
+        };
+        if (!response.ok) {
+          throw new Error(data.error ?? "Could not run AI comparison.");
+        }
+        if (!cancelled) {
+          setCompareAnalysis(data);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setCompareError(
+            error instanceof Error
+              ? error.message
+              : "Could not run AI comparison."
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setCompareLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [compareRequestKey]);
 
   const comparisonRows: { label: string; value: (property: Property) => string }[] = [
     { label: "Address", value: (property) => property.location.address },
@@ -559,6 +628,16 @@ export function ReportsView() {
         ? `<p><strong>Why this wins:</strong> ${escaped(bestComparedReasons.join(" | "))}</p>`
         : ""
     }
+    ${
+      compareAnalysis?.summary
+        ? `<p><strong>AI summary:</strong> ${escaped(compareAnalysis.summary)}</p>`
+        : ""
+    }
+    ${
+      bestComparedTradeoffs.length > 0
+        ? `<p><strong>Tradeoffs:</strong> ${escaped(bestComparedTradeoffs.join(" | "))}</p>`
+        : ""
+    }
     <table>
       <thead>
         <tr>
@@ -746,6 +825,28 @@ export function ReportsView() {
                 </div>
               </div>
 
+              {comparedProps.length === 1 ? (
+                <div className="rounded-2xl border border-amber-400/25 bg-amber-500/10 p-4 text-sm text-amber-100">
+                  Add at least one more property to run an AI comparison with OpenAI. With only one selection, Helio can export the sheet but cannot make a trade-off-based winner recommendation yet.
+                </div>
+              ) : null}
+
+              {compareLoading ? (
+                <div className="flex items-center gap-3 rounded-2xl border border-primary/20 bg-primary/10 p-4 text-sm text-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                  <span>
+                    Running AI comparison with OpenAI across value, risk,
+                    pricing, momentum, and buyer-fit tradeoffs...
+                  </span>
+                </div>
+              ) : null}
+
+              {compareError ? (
+                <div className="rounded-2xl border border-red-500/25 bg-red-500/10 p-4 text-sm text-red-100">
+                  {compareError}
+                </div>
+              ) : null}
+
               {comparedProps.length === 0 ? (
                 <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-border bg-card/20 p-8 text-center">
                   <div className="w-16 h-16 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center">
@@ -768,12 +869,11 @@ export function ReportsView() {
                       <div className="mt-1 text-base font-semibold text-foreground">
                         {bestComparedProperty.location.address}
                       </div>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        Helio ranks this property highest based on deal score, value signals, and overall comparison strength.
-                        {bestComparedProperty.dealScore
-                          ? ` Current score: ${bestComparedProperty.dealScore.total} (${bestComparedProperty.dealScore.label}).`
-                          : ""}
-                      </p>
+                      {compareAnalysis?.summary ? (
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {compareAnalysis.summary}
+                        </p>
+                      ) : null}
                       {bestComparedReasons.length > 0 ? (
                         <div className="mt-3 space-y-2">
                           <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-300/90">
@@ -784,6 +884,21 @@ export function ReportsView() {
                               <li key={reason} className="flex items-start gap-2">
                                 <span className="mt-1 h-1.5 w-1.5 rounded-full bg-emerald-300" />
                                 <span>{reason}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                      {bestComparedTradeoffs.length > 0 ? (
+                        <div className="mt-3 space-y-2">
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-300/90">
+                            Tradeoffs
+                          </div>
+                          <ul className="space-y-1.5 text-sm text-foreground/90">
+                            {bestComparedTradeoffs.map((tradeoff) => (
+                              <li key={tradeoff} className="flex items-start gap-2">
+                                <span className="mt-1 h-1.5 w-1.5 rounded-full bg-emerald-300" />
+                                <span>{tradeoff}</span>
                               </li>
                             ))}
                           </ul>
@@ -1263,99 +1378,4 @@ function PropertySidebarCard({
       </div>
     </div>
   );
-}
-
-function getBestPropertyReasons(bestProperty: Property, comparedProps: Property[]) {
-  const peers = comparedProps.filter((property) => property.id !== bestProperty.id);
-  if (peers.length === 0) return [];
-
-  const reasons: string[] = [];
-  const bestScore = bestProperty.dealScore?.total;
-  const peerScores = peers
-    .map((property) => property.dealScore?.total)
-    .filter((score): score is number => typeof score === "number");
-
-  if (typeof bestScore === "number" && peerScores.length > 0) {
-    const nextBest = Math.max(...peerScores);
-    reasons.push(
-      `Highest deal score at ${bestScore}, beating the next closest option by ${bestScore - nextBest} points.`
-    );
-  }
-
-  const bestPricePerSqft =
-    bestProperty.pricePerSqft ?? bestProperty.price / Math.max(bestProperty.details.sqft, 1);
-  const peerPricePerSqft = peers.map(
-    (property) => property.pricePerSqft ?? property.price / Math.max(property.details.sqft, 1)
-  );
-  if (peerPricePerSqft.length > 0) {
-    const averagePeerPpsf =
-      peerPricePerSqft.reduce((sum, value) => sum + value, 0) / peerPricePerSqft.length;
-    if (bestPricePerSqft < averagePeerPpsf) {
-      reasons.push(
-        `Better value per square foot at $${Math.round(bestPricePerSqft).toLocaleString()}, versus about $${Math.round(
-          averagePeerPpsf
-        ).toLocaleString()} across the other picks.`
-      );
-    }
-  }
-
-  const avgRisk =
-    (bestProperty.riskProfile.crimeScore +
-      riskSeverity(bestProperty.riskProfile.fireRisk) * 20 +
-      riskSeverity(bestProperty.riskProfile.floodRisk) * 20 +
-      riskSeverity(bestProperty.riskProfile.earthquakeRisk) * 20) /
-    4;
-  const peerRiskScores = peers.map(
-    (property) =>
-      (property.riskProfile.crimeScore +
-        riskSeverity(property.riskProfile.fireRisk) * 20 +
-        riskSeverity(property.riskProfile.floodRisk) * 20 +
-        riskSeverity(property.riskProfile.earthquakeRisk) * 20) /
-      4
-  );
-  if (peerRiskScores.length > 0) {
-    const averagePeerRisk =
-      peerRiskScores.reduce((sum, value) => sum + value, 0) / peerRiskScores.length;
-    if (avgRisk < averagePeerRisk) {
-      reasons.push(
-        `Lower overall risk profile, with a blended risk score of ${Math.round(avgRisk)} versus ${Math.round(
-          averagePeerRisk
-        )} for the other options.`
-      );
-    }
-  }
-
-  if (reasons.length < 3) {
-    const peerTrend =
-      peers.reduce((sum, property) => sum + property.neighborhoodStats.priceChangeYoY, 0) /
-      peers.length;
-    if (bestProperty.neighborhoodStats.priceChangeYoY >= peerTrend) {
-      reasons.push(
-        `Stronger neighborhood momentum at ${bestProperty.neighborhoodStats.priceChangeYoY}% YoY, supporting better upside than the rest of the set.`
-      );
-    }
-  }
-
-  if (reasons.length < 3) {
-    const peerDom =
-      peers.reduce((sum, property) => sum + property.daysOnMarket, 0) / peers.length;
-    if (bestProperty.daysOnMarket <= peerDom) {
-      reasons.push(
-        `Moving faster than the comparison group at ${bestProperty.daysOnMarket} days on market, versus ${Math.round(
-          peerDom
-        )} days on average for the others.`
-      );
-    }
-  }
-
-  return reasons.slice(0, 3);
-}
-
-function riskSeverity(risk: Property["riskProfile"]["fireRisk"]) {
-  return {
-    minimal: 0,
-    low: 1,
-    moderate: 2,
-    high: 3,
-  }[risk];
 }
