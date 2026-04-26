@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPropertyById } from "@/lib/server/listings";
-import { generateNarrative } from "@/lib/server/ai";
+import { generateOpenAIText } from "@/lib/server/ai";
 
 export const runtime = "nodejs";
 
@@ -42,12 +42,14 @@ export async function GET(req: NextRequest) {
     .filter(Boolean)
     .join("\n");
 
-  const description = await generateNarrative({
-    systemPrompt:
-      "You write vivid, specific real estate property descriptions for virtual tour prompts. Be evocative and detailed about the architecture, spaces, and setting. 3–5 sentences. No marketing clichés.",
-    prompt: `Write a rich virtual tour description for this property based on its listing data:\n\n${context}`,
-    fallback: `${property.details.beds}-bedroom, ${property.details.baths}-bathroom ${property.details.propertyType.replace(/_/g, " ")} at ${property.location.address}, ${property.location.city}. Built in ${property.details.yearBuilt}, ${property.details.sqft.toLocaleString()} sqft.${features ? ` Features include ${features}.` : ""}`,
-  });
+  const fallback = `${property.location.address} is a ${property.details.beds}-bedroom, ${property.details.baths}-bathroom ${property.details.propertyType.replace(/_/g, " ")} in ${property.location.neighborhood}, ${property.location.city}. It offers ${property.details.sqft.toLocaleString()} square feet built in ${property.details.yearBuilt}.${features ? ` Notable features include ${features}.` : ""}`;
+
+  const description =
+    (await generateOpenAIText({
+      systemPrompt:
+        "You write concise, cinematic real-estate narration for a house voiceover. Describe the home itself as if giving behind-the-scenes context to a buyer during a walkthrough. Focus on the property, layout, finishes, light, setting, and practical buyer-relevant details. Do not mention 3D models, rendering, virtual tours, cameras, or that this is AI-generated. Avoid hype and marketing clichés. Keep it to 4-6 sentences.",
+      prompt: `Write a behind-the-scenes house narration based only on these listing facts:\n\n${context}`,
+    })) ?? fallback;
 
   return NextResponse.json({ description });
 }

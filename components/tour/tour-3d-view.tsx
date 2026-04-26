@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { Maximize2, Pause, Play, RotateCcw, Volume2 } from "lucide-react";
+import { Loader2, Maximize2, Pause, Play, RotateCcw, Volume2, VolumeX } from "lucide-react";
 
 /* ─────────────────────────────────────────────────────────────
    Types
@@ -29,6 +29,9 @@ export type Tour3DViewProps = {
   addressLine: string;
   description: string;
   propertyStats?: PropertyStats;
+  narrationAudioUrl?: string;
+  narrationLoading?: boolean;
+  narrationError?: string | null;
   className?: string;
 };
 
@@ -606,20 +609,71 @@ const DEFAULT_STATS: PropertyStats = {
   pool: false, garage: true, basement: false, stories: 1,
 };
 
-export function Tour3DView({ addressLine, description, propertyStats, className }: Tour3DViewProps) {
+export function Tour3DView({
+  addressLine,
+  description,
+  propertyStats,
+  narrationAudioUrl,
+  narrationLoading = false,
+  narrationError = null,
+  className,
+}: Tour3DViewProps) {
   const stats = propertyStats ?? DEFAULT_STATS;
   const cfg = useMemo(() => buildConfig(stats), [stats]);
 
   const [playing, setPlaying] = useState(true);
   const [ready, setReady]     = useState(false);
   const [dp, setDp]           = useState(0);
+  const [narrationEnabled, setNarrationEnabled] = useState(true);
 
   const playingRef   = useRef(true);
   const progressRef  = useRef(0);
   const resetRef     = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const audioRef     = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => { playingRef.current = playing; }, [playing]);
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+
+    if (!narrationAudioUrl) return;
+
+    const audio = new Audio(narrationAudioUrl);
+    audio.preload = "auto";
+    audioRef.current = audio;
+
+    if (narrationEnabled && playing) {
+      audio.play().catch(() => {});
+    }
+
+    return () => {
+      audio.pause();
+      audio.currentTime = 0;
+      if (audioRef.current === audio) {
+        audioRef.current = null;
+      }
+    };
+  }, [narrationAudioUrl]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (!narrationEnabled) {
+      audio.pause();
+      return;
+    }
+
+    if (playing) {
+      audio.play().catch(() => {});
+    } else {
+      audio.pause();
+    }
+  }, [narrationEnabled, playing]);
 
   useEffect(() => {
     if (!ready) return;
@@ -712,8 +766,17 @@ export function Tour3DView({ addressLine, description, propertyStats, className 
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <button type="button" className="text-white/40 cursor-default">
-                <Volume2 className="w-3.5 h-3.5" />
+              <button
+                type="button"
+                onClick={() => setNarrationEnabled((current) => !current)}
+                className="text-white/60 hover:text-white"
+                title={narrationEnabled ? "Mute narration" : "Play narration"}
+              >
+                {narrationEnabled ? (
+                  <Volume2 className="w-3.5 h-3.5" />
+                ) : (
+                  <VolumeX className="w-3.5 h-3.5" />
+                )}
               </button>
               <button type="button" onClick={handleFullscreen} className="text-white/60 hover:text-white">
                 <Maximize2 className="w-3.5 h-3.5" />
@@ -726,10 +789,35 @@ export function Tour3DView({ addressLine, description, propertyStats, className 
       {/* Bottom bar */}
       <div className="flex items-center gap-2 mt-3 shrink-0">
         <Button variant="outline" size="sm" className="gap-1.5 text-xs"
-          onClick={() => { resetRef.current = true; setPlaying(true); }}>
+          onClick={() => {
+            resetRef.current = true;
+            setPlaying(true);
+            const audio = audioRef.current;
+            if (audio) {
+              audio.currentTime = 0;
+              if (narrationEnabled) {
+                audio.play().catch(() => {});
+              }
+            }
+          }}>
           <RotateCcw className="w-3.5 h-3.5" />
           Restart
         </Button>
+        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          {narrationLoading ? (
+            <>
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <span>Generating voiceover...</span>
+            </>
+          ) : narrationError ? (
+            <span className="text-red-300/80">Narration unavailable</span>
+          ) : narrationAudioUrl ? (
+            <>
+              {narrationEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+              <span>{narrationEnabled ? "Voiceover on" : "Voiceover muted"}</span>
+            </>
+          ) : null}
+        </div>
         {stats && (
           <div className="flex items-center gap-2 text-[11px] text-muted-foreground ml-1">
             <span>${stats.price.toLocaleString()}</span>
