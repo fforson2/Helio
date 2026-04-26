@@ -2,7 +2,9 @@
 
 **AI-powered real estate operating system. From search to signed — in one session.**
 
-Built for the LA market. Combines interactive property search, a proprietary Deal Score engine, AI-powered comparison, voice-enabled chat, 3D cinematic property tours, AI-generated floor plans, and downloadable reports — all in a single unified interface.
+Finding housing, especially for students and first-time renters in competitive markets like Los Angeles, is stressful and inefficient. Most platforms help people browse listings but not actually make decisions, forcing users to juggle fragmented information across multiple tools under tight deadlines. Helio was built to solve that by giving users one structured workflow to evaluate, compare, and confidently choose a place.
+
+
 
 ---
 
