@@ -7,6 +7,7 @@ import {
   useUserStore,
   useChatStore,
 } from "@/lib/store";
+import { ChatMessageBubble } from "@/components/chat/chat-message-bubble";
 import { Property } from "@/types/property";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
@@ -16,7 +17,6 @@ import {
   Send,
   Loader2,
   Bot,
-  User,
   Download,
   CheckCircle2,
   Bookmark,
@@ -33,6 +33,13 @@ interface QuickAction {
   tag: string;
   label: string;
   prompt: string;
+}
+
+interface CompareAnalysis {
+  winnerId: string;
+  summary: string;
+  reasons: string[];
+  tradeoffs: string[];
 }
 
 const QUICK_ACTIONS: QuickAction[] = [
@@ -71,15 +78,19 @@ export function ReportsView() {
     activePropertyIds,
     activeSearchSessionId,
     savedProperties,
+    comparisonIds,
     saveProperty,
     unsaveProperty,
     isPropertySaved,
+    addToComparison,
+    removeFromComparison,
+    clearComparison,
   } = usePropertyStore();
   const { profile } = useUserStore();
   const { messages, isLoading, addMessage, setLoading, clearMessages } =
     useChatStore();
 
-  const [activeTab, setActiveTab] = useState<"properties" | "saved">(
+  const [activeTab, setActiveTab] = useState<"properties" | "saved" | "compare">(
     "properties"
   );
   const [input, setInput] = useState("");
@@ -89,6 +100,11 @@ export function ReportsView() {
   const [generating, setGenerating] = useState(false);
   const [generated, setGenerated] = useState<Set<string>>(new Set());
   const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const [compareAnalysis, setCompareAnalysis] = useState<CompareAnalysis | null>(
+    null
+  );
+  const [compareLoading, setCompareLoading] = useState(false);
+  const [compareError, setCompareError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -116,9 +132,198 @@ export function ReportsView() {
     propertyMap,
     properties
   );
+  const comparedProps = resolvePropertiesById(comparisonIds, propertyMap, properties);
 
   const displayProperties =
-    activeTab === "saved" ? savedPropsList : activeProperties;
+    activeTab === "saved"
+      ? savedPropsList
+      : activeTab === "compare"
+        ? comparedProps
+        : activeProperties;
+  const compareRequestKey = JSON.stringify({
+    properties: comparedProps.map((property) => ({
+      id: property.id,
+      updatedAt: property.updatedAt,
+    })),
+    preferences: profile?.preferences ?? null,
+    userName: profile?.name ?? null,
+  });
+  const bestComparedProperty =
+    comparedProps.length >= 2 && compareAnalysis?.winnerId
+      ? comparedProps.find((property) => property.id === compareAnalysis.winnerId) ??
+        null
+      : null;
+  const bestComparedReasons = compareAnalysis?.reasons ?? [];
+  const bestComparedTradeoffs = compareAnalysis?.tradeoffs ?? [];
+
+  useEffect(() => {
+    if (comparedProps.length < 2) {
+      setCompareAnalysis(null);
+      setCompareError(null);
+      setCompareLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setCompareLoading(true);
+    setCompareError(null);
+    setCompareAnalysis(null);
+
+    fetch("/api/compare", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        properties: comparedProps,
+        userPreferences: profile?.preferences,
+        userName: profile?.name,
+      }),
+    })
+      .then(async (response) => {
+        const data = (await response.json()) as CompareAnalysis & {
+          error?: string;
+        };
+        if (!response.ok) {
+          throw new Error(data.error ?? "Could not run AI comparison.");
+        }
+        if (!cancelled) {
+          setCompareAnalysis(data);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setCompareError(
+            error instanceof Error
+              ? error.message
+              : "Could not run AI comparison."
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setCompareLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [compareRequestKey]);
+
+  const comparisonRows: { label: string; value: (property: Property) => string }[] = [
+    { label: "Address", value: (property) => property.location.address },
+    {
+      label: "Location",
+      value: (property) =>
+        `${property.location.neighborhood}, ${property.location.city}, ${property.location.state}`,
+    },
+    { label: "Price", value: (property) => property.price.toLocaleString() },
+    {
+      label: "Deal Score",
+      value: (property) =>
+        property.dealScore
+          ? `${property.dealScore.total} (${property.dealScore.label})`
+          : "N/A",
+    },
+    {
+      label: "Estimated Value",
+      value: (property) =>
+        property.estimatedValue ? property.estimatedValue.toLocaleString() : "N/A",
+    },
+    {
+      label: "Price / Sqft",
+      value: (property) =>
+        property.pricePerSqft
+          ? `$${Math.round(property.pricePerSqft).toLocaleString()}`
+          : `$${Math.round(property.price / Math.max(property.details.sqft, 1)).toLocaleString()}`,
+    },
+    {
+      label: "Beds / Baths",
+      value: (property) => `${property.details.beds} bd / ${property.details.baths} ba`,
+    },
+    {
+      label: "Square Footage",
+      value: (property) => `${property.details.sqft.toLocaleString()} sqft`,
+    },
+    {
+      label: "Lot Size",
+      value: (property) =>
+        property.details.lotSqft
+          ? `${property.details.lotSqft.toLocaleString()} sqft`
+          : "N/A",
+    },
+    {
+      label: "Year Built",
+      value: (property) => String(property.details.yearBuilt),
+    },
+    {
+      label: "Property Type",
+      value: (property) => property.details.propertyType.replace(/_/g, " "),
+    },
+    {
+      label: "Days on Market",
+      value: (property) => `${property.daysOnMarket} days`,
+    },
+    {
+      label: "Neighborhood Median Price",
+      value: (property) =>
+        `$${property.neighborhoodStats.medianPrice.toLocaleString()}`,
+    },
+    {
+      label: "Market Trend",
+      value: (property) => `${property.neighborhoodStats.priceChangeYoY}% YoY`,
+    },
+    {
+      label: "Walk Score",
+      value: (property) =>
+        property.walkScore !== undefined ? `${property.walkScore}/100` : "N/A",
+    },
+    {
+      label: "Transit Score",
+      value: (property) =>
+        property.transitScore !== undefined ? `${property.transitScore}/100` : "N/A",
+    },
+    {
+      label: "School Rating",
+      value: (property) =>
+        property.schoolRating !== undefined ? `${property.schoolRating}/10` : "N/A",
+    },
+    {
+      label: "Rental Estimate",
+      value: (property) =>
+        property.rentalEstimate ? `${property.rentalEstimate.toLocaleString()}/mo` : "N/A",
+    },
+    {
+      label: "HOA",
+      value: (property) =>
+        property.hoaFee ? `${property.hoaFee.toLocaleString()}/mo` : "None",
+    },
+    {
+      label: "Tax Rate",
+      value: (property) => (property.taxRate ? `${property.taxRate}%` : "N/A"),
+    },
+    {
+      label: "Fire Risk",
+      value: (property) =>
+        property.riskProfile.fireRisk.charAt(0).toUpperCase() +
+        property.riskProfile.fireRisk.slice(1),
+    },
+    {
+      label: "Flood Risk",
+      value: (property) =>
+        property.riskProfile.floodRisk.charAt(0).toUpperCase() +
+        property.riskProfile.floodRisk.slice(1),
+    },
+    {
+      label: "Earthquake Risk",
+      value: (property) =>
+        property.riskProfile.earthquakeRisk.charAt(0).toUpperCase() +
+        property.riskProfile.earthquakeRisk.slice(1),
+    },
+    {
+      label: "Crime Score",
+      value: (property) => `${property.riskProfile.crimeScore}/100`,
+    },
+  ];
 
   function downloadImage(url: string, caption: string) {
     const filename = caption
@@ -342,13 +547,140 @@ export function ReportsView() {
     }
   }
 
+  function getComparisonPosition(propertyId: string) {
+    const index = comparisonIds.indexOf(propertyId);
+    return index === -1 ? null : index + 1;
+  }
+
+  function toggleCompare(property: Property) {
+    const position = getComparisonPosition(property.id);
+    if (position) {
+      removeFromComparison(property.id);
+      return;
+    }
+
+    if (comparisonIds.length >= 3) {
+      toast.error("Comparison is limited to 3 properties");
+      return;
+    }
+
+    addToComparison(property.id);
+    toast.success("Added to compare", {
+      description: property.location.address,
+    });
+  }
+
+  function exportComparisonSheet() {
+    if (comparedProps.length === 0) {
+      toast.error("Select properties to compare first");
+      return;
+    }
+
+    const escaped = (value: string) =>
+      value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+
+    const tableRows = comparisonRows
+      .map(
+        (row) => `
+          <tr>
+            <td>${escaped(row.label)}</td>
+            ${comparedProps
+              .map((property) => `<td>${escaped(row.value(property))}</td>`)
+              .join("")}
+          </tr>`
+      )
+      .join("");
+
+    const table = `<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { font-family: Arial, sans-serif; padding: 24px; }
+      h1 { margin-bottom: 8px; }
+      p { margin: 0 0 16px; color: #555; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid #cbd5e1; padding: 10px; vertical-align: top; }
+      th { background: #0f172a; color: white; font-weight: 700; }
+      td:first-child { font-weight: 700; background: #f8fafc; width: 220px; }
+    </style>
+  </head>
+  <body>
+    <h1>Helio Property Comparison</h1>
+    <p>Generated ${new Date().toLocaleString()}</p>
+    ${
+      bestComparedProperty
+        ? `<p><strong>Best overall:</strong> ${escaped(
+            bestComparedProperty.location.address
+          )} (${escaped(
+            bestComparedProperty.dealScore
+              ? `${bestComparedProperty.dealScore.total} - ${bestComparedProperty.dealScore.label}`
+              : "Top comparison pick"
+          )})</p>`
+        : ""
+    }
+    ${
+      bestComparedReasons.length > 0
+        ? `<p><strong>Why this wins:</strong> ${escaped(bestComparedReasons.join(" | "))}</p>`
+        : ""
+    }
+    ${
+      compareAnalysis?.summary
+        ? `<p><strong>AI summary:</strong> ${escaped(compareAnalysis.summary)}</p>`
+        : ""
+    }
+    ${
+      bestComparedTradeoffs.length > 0
+        ? `<p><strong>Tradeoffs:</strong> ${escaped(bestComparedTradeoffs.join(" | "))}</p>`
+        : ""
+    }
+    <table>
+      <thead>
+        <tr>
+          <th>Metric</th>
+          ${comparedProps
+            .map(
+              (property) =>
+                `<th>${escaped(property.location.address)}${
+                  bestComparedProperty?.id === property.id
+                    ? "<br />Best overall"
+                    : ""
+                }<br />${escaped(`${property.location.city}, ${property.location.state}`)}</th>`
+            )
+            .join("")}
+        </tr>
+      </thead>
+      <tbody>
+        ${tableRows}
+      </tbody>
+    </table>
+  </body>
+</html>`;
+
+    const blob = new Blob([table], {
+      type: "application/vnd.ms-excel;charset=utf-8;",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `helio-compare-${comparedProps.length}-properties.xls`;
+    link.click();
+    URL.revokeObjectURL(url);
+
+    toast.success("Comparison sheet downloaded");
+  }
+
   return (
-    <div className="flex-1 flex overflow-hidden relative">
+    <div className="relative flex flex-1 min-h-0 overflow-hidden">
       {/* ── Left sidebar ─────────────────────────────────────────── */}
-      <div className="w-52 shrink-0 flex flex-col border-r border-border bg-card/20">
+      <div className="flex w-52 min-h-0 shrink-0 flex-col border-r border-border bg-card/20">
         <div className="p-2.5 border-b border-border">
           <div className="flex rounded-lg bg-secondary/40 p-0.5">
-            {(["properties", "saved"] as const).map((tab) => (
+            {(["properties", "saved", "compare"] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -359,7 +691,11 @@ export function ReportsView() {
                     : "text-muted-foreground hover:text-foreground"
                 )}
               >
-                {tab === "properties" ? "Properties" : "Saved"}
+                {tab === "properties"
+                  ? "Properties"
+                  : tab === "saved"
+                    ? "Saved"
+                    : `Compare${comparisonIds.length ? ` (${comparisonIds.length})` : ""}`}
               </button>
             ))}
           </div>
@@ -374,13 +710,15 @@ export function ReportsView() {
           </span>
         </div>
 
-        <ScrollArea className="flex-1">
+        <ScrollArea className="min-h-0 flex-1">
           <div className="p-2 space-y-2">
             {displayProperties.length === 0 && (
               <div className="py-10 text-center px-3">
                 <p className="text-[11px] text-muted-foreground leading-relaxed">
                   {activeTab === "saved"
                     ? "No saved properties yet. Bookmark listings from the map."
+                    : activeTab === "compare"
+                      ? "No comparison picks yet. Tap Compare on up to 3 listings."
                     : "No properties found."}
                 </p>
               </div>
@@ -401,6 +739,8 @@ export function ReportsView() {
                     ? unsaveProperty(property.id)
                     : saveProperty(property.id)
                 }
+                onCompare={() => toggleCompare(property)}
+                comparisonIndex={getComparisonPosition(property.id)}
               />
             ))}
           </div>
@@ -417,8 +757,8 @@ export function ReportsView() {
       </div>
 
       {/* ── Main AI panel ─────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {selectedProperty && (
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {activeTab !== "compare" && selectedProperty && (
           <div className="border-b border-border bg-card/40 px-5 py-2 flex items-center gap-3 text-xs">
             <div className="flex-1 min-w-0">
               <span className="font-semibold truncate">
@@ -454,170 +794,343 @@ export function ReportsView() {
           </div>
         )}
 
-        <ScrollArea
-          className="flex-1"
-          ref={scrollRef as React.RefObject<HTMLDivElement>}
-        >
-          <div className="max-w-2xl mx-auto px-6 py-8">
-            {messages.length === 0 ? (
-              <div className="flex flex-col items-center justify-center min-h-[52vh] gap-7 text-center">
-                <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center shadow-xl shadow-primary/25">
-                  <Home className="w-8 h-8 text-primary-foreground" />
-                </div>
-
-                <div className="space-y-2">
+        {activeTab === "compare" ? (
+          <ScrollArea className="min-h-0 flex-1">
+            <div className="mx-auto max-w-6xl px-6 py-8 space-y-6">
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
                   <h2 className="text-[22px] font-bold tracking-tight">
-                    Helio Intelligence
+                    Compare Buildings Side by Side
                   </h2>
-                  <p className="text-sm text-muted-foreground max-w-[300px] leading-relaxed">
-                    Generate floor plan schematics, create PDF market reports,
-                    or ask any real estate question. Multimodal — all data is
-                    shared.
+                  <p className="text-sm text-muted-foreground max-w-2xl leading-relaxed">
+                    Select up to three properties from the list and export an Excel sheet with the key metrics buyers care about most.
                   </p>
                 </div>
-
-                <div className="w-full max-w-md grid grid-cols-2 gap-2.5">
-                  {QUICK_ACTIONS.map((action) => (
-                    <button
-                      key={action.id}
-                      onClick={() => handleQuickAction(action)}
-                      disabled={isLoading}
-                      className="flex items-start gap-2.5 p-3 rounded-xl border border-border hover:border-primary/50 hover:bg-primary/5 text-left transition-all group disabled:opacity-50"
-                    >
-                      <span className="shrink-0 text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded mt-0.5 leading-none font-mono">
-                        {action.tag}
-                      </span>
-                      <span className="text-[12px] text-muted-foreground group-hover:text-foreground transition-colors leading-snug">
-                        {action.label}
-                      </span>
-                    </button>
-                  ))}
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={clearComparison}
+                    disabled={comparisonIds.length === 0}
+                    className="px-3 py-2 rounded-lg border border-border hover:bg-secondary text-sm font-medium transition-colors disabled:opacity-40"
+                  >
+                    Clear compare
+                  </button>
+                  <button
+                    onClick={exportComparisonSheet}
+                    disabled={comparisonIds.length === 0}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-40"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Export Excel
+                  </button>
                 </div>
               </div>
-            ) : (
-              <div className="space-y-4 pb-2">
-                {messages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={cn(
-                      "flex gap-3",
-                      message.role === "user" ? "flex-row-reverse" : "flex-row"
-                    )}
-                  >
-                    <div
-                      className={cn(
-                        "w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5",
-                        message.role === "user"
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-card border border-border"
-                      )}
-                    >
-                      {message.role === "user" ? (
-                        <User className="w-3.5 h-3.5" />
-                      ) : (
-                        <Bot className="w-3.5 h-3.5 text-primary" />
-                      )}
-                    </div>
-                    <div
-                      className={cn(
-                        "max-w-[80%] rounded-xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap",
-                        message.role === "user"
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-card border border-border"
-                      )}
-                    >
-                      {message.imageUrl && (
-                        <div className="mb-2 -mx-1">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={message.imageUrl}
-                            alt={message.imageCaption ?? "Floor plan"}
-                            className="rounded-lg border border-border max-w-full"
-                          />
-                          <button
-                            onClick={() =>
-                              downloadImage(
-                                message.imageUrl!,
-                                message.imageCaption ?? "helio-schematic"
-                              )
-                            }
-                            className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-lg border border-border hover:bg-secondary transition-colors"
-                          >
-                            <Download className="w-3 h-3" />
-                            Download schematic
-                          </button>
+
+              {comparedProps.length === 1 ? (
+                <div className="rounded-2xl border border-amber-400/25 bg-amber-500/10 p-4 text-sm text-amber-100">
+                  Add at least one more property to run an AI comparison with OpenAI. With only one selection, Helio can export the sheet but cannot make a trade-off-based winner recommendation yet.
+                </div>
+              ) : null}
+
+              {compareLoading ? (
+                <div className="flex items-center gap-3 rounded-2xl border border-primary/20 bg-primary/10 p-4 text-sm text-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                  <span>
+                    Running AI comparison with OpenAI across value, risk,
+                    pricing, momentum, and buyer-fit tradeoffs...
+                  </span>
+                </div>
+              ) : null}
+
+              {compareError ? (
+                <div className="rounded-2xl border border-red-500/25 bg-red-500/10 p-4 text-sm text-red-100">
+                  {compareError}
+                </div>
+              ) : null}
+
+              {comparedProps.length === 0 ? (
+                <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-border bg-card/20 p-8 text-center">
+                  <div className="w-16 h-16 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+                    <Home className="w-8 h-8 text-primary" />
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="text-lg font-semibold">No properties selected yet</h3>
+                    <p className="text-sm text-muted-foreground max-w-md">
+                      Use the Compare button on any listing in the Reports sidebar to build a 3-property comparison set.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {bestComparedProperty ? (
+                    <div className="rounded-2xl border border-emerald-400/25 bg-emerald-500/10 p-4">
+                      <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-300">
+                        Best Overall
+                      </div>
+                      <div className="mt-1 text-base font-semibold text-foreground">
+                        {bestComparedProperty.location.address}
+                      </div>
+                      {compareAnalysis?.summary ? (
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {compareAnalysis.summary}
+                        </p>
+                      ) : null}
+                      {bestComparedReasons.length > 0 ? (
+                        <div className="mt-3 space-y-2">
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-300/90">
+                            Why This Wins
+                          </div>
+                          <ul className="space-y-1.5 text-sm text-foreground/90">
+                            {bestComparedReasons.map((reason) => (
+                              <li key={reason} className="flex items-start gap-2">
+                                <span className="mt-1 h-1.5 w-1.5 rounded-full bg-emerald-300" />
+                                <span>{reason}</span>
+                              </li>
+                            ))}
+                          </ul>
                         </div>
-                      )}
-                      {message.content}
+                      ) : null}
+                      {bestComparedTradeoffs.length > 0 ? (
+                        <div className="mt-3 space-y-2">
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-300/90">
+                            Tradeoffs
+                          </div>
+                          <ul className="space-y-1.5 text-sm text-foreground/90">
+                            {bestComparedTradeoffs.map((tradeoff) => (
+                              <li key={tradeoff} className="flex items-start gap-2">
+                                <span className="mt-1 h-1.5 w-1.5 rounded-full bg-emerald-300" />
+                                <span>{tradeoff}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  <div className="grid gap-4 md:grid-cols-3">
+                    {comparedProps.map((property, index) => (
                       <div
+                        key={property.id}
                         className={cn(
-                          "text-[10px] mt-1.5",
-                          message.role === "user"
-                            ? "text-primary-foreground/50"
-                            : "text-muted-foreground"
+                          "rounded-2xl border bg-card/30 p-4",
+                          bestComparedProperty?.id === property.id
+                            ? "border-emerald-400/35 ring-1 ring-emerald-400/20"
+                            : "border-border"
                         )}
                       >
-                        {new Date(message.timestamp).toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-[10px] uppercase tracking-[0.2em] text-primary/80">
+                              Compare {index + 1}
+                            </div>
+                            {bestComparedProperty?.id === property.id ? (
+                              <div className="mt-1 inline-flex rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-300">
+                                Best overall
+                              </div>
+                            ) : null}
+                            <div className="mt-1 text-sm font-semibold">
+                              {property.location.address}
+                            </div>
+                            <div className="text-[11px] text-muted-foreground">
+                              {property.location.city}, {property.location.state}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => removeFromComparison(property.id)}
+                            className="w-7 h-7 rounded-md border border-border hover:bg-secondary flex items-center justify-center"
+                            aria-label={`Remove ${property.location.address} from compare`}
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                          <div className="rounded-xl bg-secondary/30 p-3">
+                            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                              Price
+                            </div>
+                            <div className="mt-1 font-semibold">
+                              {formatPrice(property.price)}
+                            </div>
+                          </div>
+                          <div className="rounded-xl bg-secondary/30 p-3">
+                            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                              Deal Score
+                            </div>
+                            <div className="mt-1 font-semibold">
+                              {property.dealScore?.total ?? "—"}
+                            </div>
+                          </div>
+                        </div>
                       </div>
+                    ))}
+                  </div>
+
+                  <div className="overflow-hidden rounded-2xl border border-border bg-card/20">
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full border-collapse">
+                        <thead>
+                          <tr className="border-b border-border bg-secondary/30">
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                              Metric
+                            </th>
+                            {comparedProps.map((property) => (
+                              <th
+                                key={property.id}
+                                className={cn(
+                                  "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-foreground min-w-[220px]",
+                                  bestComparedProperty?.id === property.id && "bg-emerald-500/10"
+                                )}
+                              >
+                                {property.location.address}
+                                {bestComparedProperty?.id === property.id ? (
+                                  <div className="mt-1 text-[10px] font-semibold tracking-[0.16em] text-emerald-300">
+                                    Best overall
+                                  </div>
+                                ) : null}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {comparisonRows.map((row, index) => (
+                            <tr
+                              key={row.label}
+                              className={cn(
+                                "border-b border-border/70",
+                                index % 2 === 0 ? "bg-background/30" : "bg-secondary/10"
+                              )}
+                            >
+                              <td className="px-4 py-3 text-sm font-medium text-muted-foreground">
+                                {row.label}
+                              </td>
+                              {comparedProps.map((property) => (
+                                <td
+                                  key={`${property.id}-${row.label}`}
+                                  className={cn(
+                                    "px-4 py-3 text-sm text-foreground align-top",
+                                    bestComparedProperty?.id === property.id && "bg-emerald-500/[0.06]"
+                                  )}
+                                >
+                                  {row.value(property)}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
-                ))}
+                </>
+              )}
+            </div>
+          </ScrollArea>
+        ) : (
+          <>
+            <ScrollArea
+              className="min-h-0 flex-1"
+              ref={scrollRef as React.RefObject<HTMLDivElement>}
+            >
+              <div className="mx-auto max-w-2xl px-6 py-8">
+                {messages.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center min-h-[52vh] gap-7 text-center">
+                    <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center shadow-xl shadow-primary/25">
+                      <Home className="w-8 h-8 text-primary-foreground" />
+                    </div>
 
-                {isLoading && (
-                  <div className="flex gap-3">
-                    <div className="w-7 h-7 rounded-lg bg-card border border-border flex items-center justify-center shrink-0">
-                      <Bot className="w-3.5 h-3.5 text-primary" />
+                    <div className="space-y-2">
+                      <h2 className="text-[22px] font-bold tracking-tight">
+                        Helio Intelligence
+                      </h2>
+                      <p className="text-sm text-muted-foreground max-w-[300px] leading-relaxed">
+                        Generate floor plan schematics, create PDF market reports,
+                        or ask any real estate question. Multimodal — all data is
+                        shared.
+                      </p>
                     </div>
-                    <div className="bg-card border border-border rounded-xl px-4 py-3 flex items-center gap-2">
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />
-                      <span className="text-sm text-muted-foreground">
-                        Working…
-                      </span>
+
+                    <div className="w-full max-w-md grid grid-cols-2 gap-2.5">
+                      {QUICK_ACTIONS.map((action) => (
+                        <button
+                          key={action.id}
+                          onClick={() => handleQuickAction(action)}
+                          disabled={isLoading}
+                          className="flex items-start gap-2.5 p-3 rounded-xl border border-border hover:border-primary/50 hover:bg-primary/5 text-left transition-all group disabled:opacity-50"
+                        >
+                          <span className="shrink-0 text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded mt-0.5 leading-none font-mono">
+                            {action.tag}
+                          </span>
+                          <span className="text-[12px] text-muted-foreground group-hover:text-foreground transition-colors leading-snug">
+                            {action.label}
+                          </span>
+                        </button>
+                      ))}
                     </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4 pb-4">
+                    {messages.map((message) => (
+                      <ChatMessageBubble
+                        key={message.id}
+                        message={message}
+                        onDownloadImage={(url, caption) => downloadImage(url, caption)}
+                        downloadImageLabel="Download schematic"
+                      />
+                    ))}
+
+                    {isLoading && (
+                      <div className="flex gap-3">
+                        <div className="w-7 h-7 rounded-lg bg-card border border-border flex items-center justify-center shrink-0">
+                          <Bot className="w-3.5 h-3.5 text-primary" />
+                        </div>
+                        <div className="bg-card border border-border rounded-xl px-4 py-3 flex items-center gap-2">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />
+                          <span className="text-sm text-muted-foreground">
+                            Working…
+                          </span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
-            )}
-          </div>
-        </ScrollArea>
+            </ScrollArea>
 
-        <div className="border-t border-border p-4">
-          <div className="max-w-2xl mx-auto">
-            <div className="flex items-end gap-2 rounded-xl border border-border bg-card/40 px-3 py-2.5 focus-within:border-primary/50 transition-colors">
-              <textarea
-                ref={textareaRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    sendMessage();
-                  }
-                }}
-                placeholder="Ask about floor plans, reports, market analysis..."
-                className="flex-1 bg-transparent text-sm resize-none outline-none min-h-[20px] max-h-28 placeholder:text-muted-foreground/50 leading-relaxed"
-                rows={1}
-              />
-              <button
-                onClick={() => sendMessage()}
-                disabled={!input.trim() || isLoading}
-                className="shrink-0 w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground transition-opacity disabled:opacity-30 hover:opacity-90"
-              >
-                {isLoading ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Send className="w-3.5 h-3.5" />
-                )}
-              </button>
+            <div className="shrink-0 border-t border-border bg-background/95 p-4 backdrop-blur">
+              <div className="max-w-2xl mx-auto">
+                <div className="flex items-end gap-2 rounded-xl border border-border bg-card/40 px-3 py-2.5 focus-within:border-primary/50 transition-colors">
+                  <textarea
+                    ref={textareaRef}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        sendMessage();
+                      }
+                    }}
+                    placeholder="Ask about floor plans, reports, market analysis..."
+                    className="flex-1 bg-transparent text-sm resize-none outline-none min-h-[20px] max-h-28 placeholder:text-muted-foreground/50 leading-relaxed"
+                    rows={1}
+                  />
+                  <button
+                    onClick={() => sendMessage()}
+                    disabled={!input.trim() || isLoading}
+                    className="shrink-0 w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground transition-opacity disabled:opacity-30 hover:opacity-90"
+                  >
+                    {isLoading ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Send className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                </div>
+                <p className="text-center text-[10px] text-muted-foreground/50 mt-2">
+                  Shift+Enter new line · Enter to send
+                </p>
+              </div>
             </div>
-            <p className="text-center text-[10px] text-muted-foreground/50 mt-2">
-              Shift+Enter new line · Enter to send
-            </p>
-          </div>
-        </div>
+          </>
+        )}
       </div>
 
       {/* ── Email modal ───────────────────────────────────────────── */}
@@ -765,12 +1278,16 @@ function PropertySidebarCard({
   isSaved,
   onSelect,
   onSave,
+  onCompare,
+  comparisonIndex,
 }: {
   property: Property;
   isSelected: boolean;
   isSaved: boolean;
   onSelect: () => void;
   onSave: () => void;
+  onCompare: () => void;
+  comparisonIndex: number | null;
 }) {
   const changeYoY = property.neighborhoodStats?.priceChangeYoY ?? 0;
   const isPositive = changeYoY >= 0;
@@ -836,6 +1353,27 @@ function PropertySidebarCard({
         </div>
         <div className="text-[10px] text-muted-foreground/60 truncate mt-0.5">
           {property.details.propertyType.replace(/_/g, " ")}
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onCompare();
+            }}
+            className={cn(
+              "relative flex-1 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition-colors",
+              comparisonIndex
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border hover:bg-secondary"
+            )}
+          >
+            Compare
+            {comparisonIndex ? (
+              <span className="absolute -top-2 -right-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground px-1 text-[10px] font-bold text-background">
+                {comparisonIndex}
+              </span>
+            ) : null}
+          </button>
         </div>
       </div>
     </div>

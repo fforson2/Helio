@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useChatStore, usePropertyStore, useUserStore } from "@/lib/store";
 import { AgentPropertySidebar } from "@/components/agent/agent-property-sidebar";
+import { ChatMessageBubble } from "@/components/chat/chat-message-bubble";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -10,15 +11,12 @@ import { cn } from "@/lib/utils";
 import {
   Send,
   Bot,
-  User,
   Loader2,
   Volume2,
   Square,
   Mic,
   MicOff,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 
 type VoiceState = "idle" | "recording" | "transcribing";
 
@@ -437,82 +435,37 @@ export default function AgentPage() {
                 )}
 
                 {messages.map((message) => (
-                  <div
+                  <ChatMessageBubble
                     key={message.id}
-                    className={cn(
-                      "flex gap-3",
-                      message.role === "user" ? "flex-row-reverse" : "flex-row"
-                    )}
-                  >
-                    <div
-                      className={cn(
-                        "w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5",
-                        message.role === "user"
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-card border border-border"
-                      )}
-                    >
-                      {message.role === "user" ? (
-                        <User className="w-3.5 h-3.5" />
-                      ) : (
-                        <Bot className="w-3.5 h-3.5 text-primary" />
-                      )}
-                    </div>
-                    <div
-                      className={cn(
-                        "max-w-[80%] rounded-xl px-4 py-3 text-sm leading-relaxed",
-                        message.role === "user"
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-card border border-border"
-                      )}
-                    >
-                      {message.role === "assistant" ? (
-                        <div className="prose prose-sm prose-invert max-w-none break-words prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0 prose-pre:my-2 prose-pre:overflow-x-auto prose-code:before:content-none prose-code:after:content-none">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {message.content}
-                          </ReactMarkdown>
-                        </div>
-                      ) : (
-                        <div className="whitespace-pre-wrap">{message.content}</div>
-                      )}
-                      {message.role === "assistant" && (
-                        <div className="mt-2 flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => playTTS(message.id, message.content)}
-                            disabled={ttsLoadingId === message.id}
-                            className={cn(
-                              "inline-flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-md border transition-colors",
-                              "border-border hover:bg-muted/60",
-                              ttsLoadingId === message.id && "opacity-70 cursor-not-allowed"
-                            )}
-                          >
-                            {ttsLoadingId === message.id ? (
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                            ) : ttsPlayingId === message.id ? (
-                              <Square className="w-3 h-3" />
-                            ) : (
-                              <Volume2 className="w-3 h-3" />
-                            )}
-                            <span>{ttsPlayingId === message.id ? "Stop" : "Speak"}</span>
-                          </button>
-                        </div>
-                      )}
-                      <div
-                        className={cn(
-                          "text-[10px] mt-1.5",
-                          message.role === "user"
-                            ? "text-primary-foreground/60"
-                            : "text-muted-foreground"
-                        )}
-                      >
-                        {new Date(message.timestamp).toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
+                    message={message}
+                    renderAssistantFooter={(assistantMessage) => (
+                      <div className="mt-2 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            playTTS(assistantMessage.id, assistantMessage.content)
+                          }
+                          disabled={ttsLoadingId === assistantMessage.id}
+                          className={cn(
+                            "inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11px] transition-colors hover:bg-muted/60",
+                            ttsLoadingId === assistantMessage.id &&
+                              "cursor-not-allowed opacity-70"
+                          )}
+                        >
+                          {ttsLoadingId === assistantMessage.id ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : ttsPlayingId === assistantMessage.id ? (
+                            <Square className="h-3 w-3" />
+                          ) : (
+                            <Volume2 className="h-3 w-3" />
+                          )}
+                          <span>
+                            {ttsPlayingId === assistantMessage.id ? "Stop" : "Speak"}
+                          </span>
+                        </button>
                       </div>
-                    </div>
-                  </div>
+                    )}
+                  />
                 ))}
 
                 {isLoading && (

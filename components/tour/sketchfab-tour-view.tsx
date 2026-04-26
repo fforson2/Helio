@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
-import { AlertCircle, Box, Orbit, RotateCcw } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AlertCircle, Box, Loader2, Orbit, RotateCcw, Volume2, VolumeX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -11,6 +11,9 @@ interface SketchfabTourViewProps {
   description: string;
   archetype?: string;
   reason?: string;
+  narrationAudioUrl?: string;
+  narrationLoading?: boolean;
+  narrationError?: string | null;
   className?: string;
 }
 
@@ -28,8 +31,14 @@ export function SketchfabTourView({
   description,
   archetype,
   reason,
+  narrationAudioUrl,
+  narrationLoading = false,
+  narrationError = null,
   className,
 }: SketchfabTourViewProps) {
+  const [narrationEnabled, setNarrationEnabled] = useState(true);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
   const embedUrl = useMemo(() => {
     const params = new URLSearchParams({
       autostart: "1",
@@ -44,6 +53,51 @@ export function SketchfabTourView({
     });
     return `https://sketchfab.com/models/${uid}/embed?${params.toString()}`;
   }, [uid]);
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+
+    if (!narrationAudioUrl) return;
+
+    const audio = new Audio(narrationAudioUrl);
+    audio.preload = "auto";
+    audioRef.current = audio;
+
+    if (narrationEnabled) {
+      audio.play().catch(() => {});
+    }
+
+    return () => {
+      audio.pause();
+      audio.currentTime = 0;
+      if (audioRef.current === audio) {
+        audioRef.current = null;
+      }
+    };
+  }, [narrationAudioUrl]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (narrationEnabled) {
+      audio.play().catch(() => {});
+    } else {
+      audio.pause();
+    }
+  }, [narrationEnabled]);
+
+  function restartNarration() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.currentTime = 0;
+    if (narrationEnabled) {
+      audio.play().catch(() => {});
+    }
+  }
 
   return (
     <div className={cn("flex h-full min-h-0 flex-col", className)}>
@@ -75,6 +129,26 @@ export function SketchfabTourView({
           <RotateCcw className="w-3.5 h-3.5" />
           Open model
         </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5 text-xs"
+          onClick={restartNarration}
+          disabled={!narrationAudioUrl}
+        >
+          <RotateCcw className="w-3.5 h-3.5" />
+          Replay voiceover
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5 text-xs"
+          onClick={() => setNarrationEnabled((current) => !current)}
+          disabled={!narrationAudioUrl}
+        >
+          {narrationEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+          {narrationEnabled ? "Mute narration" : "Play narration"}
+        </Button>
         <div className="ml-1 flex items-center gap-2 text-[11px] text-muted-foreground">
           <Box className="w-3.5 h-3.5" />
           <span>Interactive prefab home viewer</span>
@@ -89,6 +163,20 @@ export function SketchfabTourView({
           </p>
         )}
       </div>
+
+      {narrationLoading ? (
+        <div className="mt-2 flex items-center gap-2 rounded-lg border border-border/50 bg-card/40 px-3 py-2 text-[11px] text-muted-foreground">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          <p>Generating ElevenLabs voiceover for this tour...</p>
+        </div>
+      ) : null}
+
+      {narrationError ? (
+        <div className="mt-2 flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] text-red-100">
+          <AlertCircle className="mt-0.5 w-3.5 h-3.5 shrink-0" />
+          <p>{narrationError}</p>
+        </div>
+      ) : null}
 
       {reason ? (
         <div className="mt-2 flex items-start gap-2 rounded-lg border border-border/50 bg-card/40 px-3 py-2 text-[11px] text-muted-foreground">

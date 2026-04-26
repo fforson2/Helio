@@ -205,6 +205,40 @@ async function callOpenAIJson<T>(prompt: string): Promise<T | null> {
   }
 }
 
+export async function generateOpenAIJson<T>(input: {
+  prompt: string;
+  systemPrompt?: string;
+}): Promise<T | null> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+        messages: [
+          ...(input.systemPrompt
+            ? [{ role: "system", content: input.systemPrompt }]
+            : []),
+          { role: "user", content: input.prompt },
+        ],
+        temperature: 0.2,
+        response_format: { type: "json_object" },
+      }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return parseJsonResponse<T>(data.choices?.[0]?.message?.content ?? "");
+  } catch {
+    return null;
+  }
+}
+
 async function callGeminiText(prompt: string, systemPrompt?: string): Promise<string | null> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
@@ -257,6 +291,13 @@ async function callOpenAIText(prompt: string, systemPrompt?: string): Promise<st
   } catch {
     return null;
   }
+}
+
+export async function generateOpenAIText(input: {
+  prompt: string;
+  systemPrompt?: string;
+}): Promise<string | null> {
+  return callOpenAIText(input.prompt, input.systemPrompt);
 }
 
 export async function generateSearchIntent(query: string, userPreferences?: Partial<BuyerPreferences>): Promise<SearchIntent> {

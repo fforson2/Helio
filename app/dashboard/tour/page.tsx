@@ -33,6 +33,9 @@ export default function TourPage() {
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null);
   const [descriptionLoading, setDescriptionLoading] = useState(false);
   const [description, setDescription] = useState(DEFAULT_DESCRIPTION);
+  const [narrationAudioUrl, setNarrationAudioUrl] = useState<string | null>(null);
+  const [narrationLoading, setNarrationLoading] = useState(false);
+  const [narrationError, setNarrationError] = useState<string | null>(null);
   const [renderer, setRenderer] = useState<TourRendererState>({ mode: "threejs" });
 
   const properties = usePropertyStore((state) => state.properties);
@@ -69,6 +72,11 @@ export default function TourPage() {
   const addressLine = selectedProperty
     ? `${selectedProperty.location.address} · ${selectedProperty.location.city}, ${selectedProperty.location.state}`
     : "Select a listing to explore";
+
+  const narrationText = useMemo(() => {
+    if (!selectedProperty) return "";
+    return description.trim();
+  }, [description, selectedProperty]);
 
   const propertyStats = useMemo(() => {
     if (!selectedProperty) return undefined;
@@ -152,6 +160,74 @@ export default function TourPage() {
     };
   }, [selectedPropertyId]);
 
+  useEffect(() => {
+    if (!selectedPropertyId || !narrationText.trim()) {
+      setNarrationLoading(false);
+      setNarrationError(null);
+      setNarrationAudioUrl((currentUrl) => {
+        if (currentUrl) URL.revokeObjectURL(currentUrl);
+        return null;
+      });
+      return;
+    }
+
+    let cancelled = false;
+    setNarrationLoading(true);
+    setNarrationError(null);
+
+    fetch("/api/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: narrationText }),
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const data = (await response.json().catch(() => null)) as
+            | { error?: string }
+            | null;
+          throw new Error(data?.error ?? "Could not generate tour narration.");
+        }
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        if (cancelled) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+        setNarrationAudioUrl((currentUrl) => {
+          if (currentUrl) URL.revokeObjectURL(currentUrl);
+          return objectUrl;
+        });
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setNarrationError(
+            error instanceof Error
+              ? error.message
+              : "Could not generate tour narration."
+          );
+          setNarrationAudioUrl((currentUrl) => {
+            if (currentUrl) URL.revokeObjectURL(currentUrl);
+            return null;
+          });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setNarrationLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [narrationText, selectedPropertyId]);
+
+  useEffect(() => {
+    return () => {
+      if (narrationAudioUrl) URL.revokeObjectURL(narrationAudioUrl);
+    };
+  }, [narrationAudioUrl]);
+
   return (
     <div className="flex-1 flex overflow-hidden">
       <AgentPropertySidebar
@@ -210,6 +286,9 @@ export default function TourPage() {
               description={description}
               archetype={renderer.archetype}
               reason={renderer.reason}
+              narrationAudioUrl={narrationAudioUrl ?? undefined}
+              narrationLoading={narrationLoading}
+              narrationError={narrationError}
             />
           ) : (
             <Tour3DView
@@ -218,6 +297,9 @@ export default function TourPage() {
               addressLine={addressLine}
               description={description}
               propertyStats={propertyStats}
+              narrationAudioUrl={narrationAudioUrl ?? undefined}
+              narrationLoading={narrationLoading}
+              narrationError={narrationError}
             />
           )}
         </div>
