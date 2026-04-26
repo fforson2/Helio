@@ -1,34 +1,89 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePropertyStore } from "@/lib/store";
 import { AgentPropertySidebar } from "@/components/agent/agent-property-sidebar";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Globe, Circle } from "lucide-react";
+import { Tour3DView } from "@/components/tour/tour-3d-view";
 import { cn } from "@/lib/utils";
+import { Box, ImageOff, Loader2 } from "lucide-react";
 
-const QUICK_PROMPTS = [
-  "Full Property Tour",
-  "Exterior Walk-Around",
-  "Interior Room Tour",
-  "Neighborhood Flyover",
-];
+const FALLBACK_HERO =
+  "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=1400&q=80";
+
+const DEFAULT_DESCRIPTION =
+  "Modern home with clean architectural lines, open floor plan, and abundant natural light throughout.";
 
 export default function TourPage() {
-  const [prompt, setPrompt] = useState("");
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null);
-  const { properties } = usePropertyStore();
-  const canStart = prompt.trim().length > 0;
+  const [descriptionLoading, setDescriptionLoading] = useState(false);
+  const [description, setDescription] = useState(DEFAULT_DESCRIPTION);
 
-  function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-      if (canStart) {
-        // TODO: start tour
-      }
+  const properties = usePropertyStore((state) => state.properties);
+  const propertyMap = usePropertyStore((state) => state.propertyMap);
+  const selectedProperty = selectedPropertyId
+    ? propertyMap[selectedPropertyId] ??
+      properties.find((p) => p.id === selectedPropertyId) ??
+      null
+    : null;
+
+  // Auto-select first property once loaded
+  useEffect(() => {
+    if (selectedPropertyId || properties.length === 0) return;
+    setSelectedPropertyId(properties[0].id);
+  }, [properties, selectedPropertyId]);
+
+  const photos = useMemo(() => {
+    if (!selectedProperty) return [FALLBACK_HERO];
+    return selectedProperty.photos.length > 0
+      ? selectedProperty.photos
+      : [FALLBACK_HERO];
+  }, [selectedProperty]);
+
+  const addressLine = selectedProperty
+    ? `${selectedProperty.location.address} · ${selectedProperty.location.city}, ${selectedProperty.location.state}`
+    : "Select a listing to explore";
+
+  const propertyStats = useMemo(() => {
+    if (!selectedProperty) return undefined;
+    return {
+      price: selectedProperty.price,
+      beds: selectedProperty.details.beds,
+      baths: selectedProperty.details.baths,
+      sqft: selectedProperty.details.sqft,
+      yearBuilt: selectedProperty.details.yearBuilt,
+      propertyType: selectedProperty.details.propertyType,
+      pool: selectedProperty.details.pool ?? false,
+      garage: selectedProperty.details.garage ?? false,
+      basement: selectedProperty.details.basement ?? false,
+      stories: selectedProperty.details.stories ?? 1,
+    };
+  }, [selectedProperty]);
+
+  // Fetch AI description from listing data
+  useEffect(() => {
+    if (!selectedPropertyId) {
+      setDescription(DEFAULT_DESCRIPTION);
+      return;
     }
-  }
+    setDescriptionLoading(true);
+    fetch(`/api/tour/description?propertyId=${encodeURIComponent(selectedPropertyId)}`)
+      .then((r) => r.json())
+      .then((data: { description?: string }) => {
+        if (data.description) setDescription(data.description);
+        else if (selectedProperty) {
+          setDescription(
+            `${selectedProperty.location.address}, ${selectedProperty.details.beds} bed, ` +
+              `${selectedProperty.details.baths} bath, ${selectedProperty.details.sqft} sqft home.`
+          );
+        }
+      })
+      .catch(() => {
+        if (selectedProperty) {
+          setDescription(`${selectedProperty.location.address}, ${selectedProperty.location.city}.`);
+        }
+      })
+      .finally(() => setDescriptionLoading(false));
+  }, [selectedPropertyId, selectedProperty]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="flex-1 flex overflow-hidden">
@@ -38,90 +93,63 @@ export default function TourPage() {
       />
 
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Prompt input bar */}
-        <div className="border-b border-border px-5 py-3 bg-card/30 shrink-0">
-          <div className="flex items-center gap-3">
-            <Input
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Describe the property tour you want — walk around, enter the building, explore rooms..."
-              className="flex-1 bg-transparent border-none shadow-none focus-visible:ring-0 text-sm placeholder:text-muted-foreground/60"
-            />
-            <Button
-              disabled={!canStart}
-              size="sm"
-              className="shrink-0 px-4"
+        {/* Property header */}
+        {selectedProperty && (
+          <div className="shrink-0 border-b border-border/60 bg-card/20 px-4 py-3 flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">
+                {selectedProperty.location.address}
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                {selectedProperty.location.city}, {selectedProperty.location.state} ·{" "}
+                {selectedProperty.details.beds}bd / {selectedProperty.details.baths}ba ·{" "}
+                {selectedProperty.details.sqft.toLocaleString()} sqft
+              </p>
+            </div>
+            {descriptionLoading && (
+              <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground shrink-0">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Loading description…
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="flex-1 p-4 min-h-0 flex flex-col">
+          {!selectedProperty ? (
+            <div
+              className={cn(
+                "flex-1 flex flex-col items-center justify-center rounded-xl border border-dashed border-border/50 bg-card/20 p-8 text-center"
+              )}
             >
-              Start Tour
-            </Button>
-          </div>
-
-          {/* Quick prompt chips */}
-          <div className="flex items-center gap-2 mt-2.5">
-            <span className="text-[11px] text-muted-foreground/50 italic">Try:</span>
-            {QUICK_PROMPTS.map((p) => (
-              <button
-                key={p}
-                type="button"
-                onClick={() => setPrompt(p)}
-                className={cn(
-                  "px-3 py-1 rounded-full border text-[11px] font-medium transition-all",
-                  prompt === p
-                    ? "border-primary/50 bg-primary/10 text-primary"
-                    : "border-border/60 text-muted-foreground hover:border-primary/30 hover:text-foreground hover:bg-primary/5"
-                )}
-              >
-                {p}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Main content — empty state */}
-        <div className="flex-1 flex flex-col items-center justify-center px-6">
-          <div className="flex flex-col items-center gap-5">
-            {/* Globe wireframe icon */}
-            <div className="relative w-24 h-24 flex items-center justify-center">
-              <Globe className="w-20 h-20 text-primary/25 stroke-[0.8]" />
-            </div>
-
-            <div className="text-center space-y-1.5">
-              <p className="text-sm text-muted-foreground">
-                Enter a prompt and press{" "}
-                <span className="font-semibold text-foreground">Start Tour</span>
-              </p>
-              <p className="text-sm text-muted-foreground/70">
-                to start a live interactive virtual property tour.
+              <ImageOff className="w-10 h-10 text-muted-foreground/40 mb-3" />
+              <p className="text-sm text-muted-foreground max-w-sm">
+                {properties.length === 0
+                  ? "Loading properties for the Tour…"
+                  : "Choose a property on the left to start a 3D cinematic tour through the listing."}
               </p>
             </div>
-
-            <div className="flex items-center gap-1.5 mt-2">
-              <kbd className="px-2 py-1 rounded-md bg-muted/60 border border-border text-[11px] font-mono text-muted-foreground">
-                Ctrl
-              </kbd>
-              <span className="text-muted-foreground/40 text-xs">+</span>
-              <kbd className="px-2 py-1 rounded-md bg-muted/60 border border-border text-[11px] font-mono text-muted-foreground">
-                Enter
-              </kbd>
-              <span className="text-[11px] text-muted-foreground/40 ml-1">to preview</span>
-            </div>
-          </div>
+          ) : (
+            <Tour3DView
+              key={selectedPropertyId ?? "none"}
+              photos={photos}
+              addressLine={addressLine}
+              description={description}
+              propertyStats={propertyStats}
+            />
+          )}
         </div>
 
-        {/* Bottom status bar */}
+        {/* Status bar */}
         <div className="h-8 border-t border-border flex items-center px-4 gap-4 bg-card/20 shrink-0 text-[10px]">
           <div className="flex items-center gap-1.5">
-            <Circle className="w-2 h-2 fill-emerald-500 text-emerald-500" />
-            <span className="text-muted-foreground/70">Operational</span>
+            <Box className="w-2.5 h-2.5 text-primary" />
+            <span className="text-muted-foreground/70">Three.js 3D Tour</span>
           </div>
-          <span className="text-muted-foreground/40">United States</span>
-          <span className="text-muted-foreground/40">{properties.length > 0 ? "78" : "0"} metros</span>
-          <span className="text-muted-foreground/40">32 feeds</span>
-          <div className="flex-1" />
-          <span className="text-muted-foreground/30 tabular-nums">
-            {new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+          <span className="text-muted-foreground/40">
+            Interior walkthrough · Spacebar to play/pause
           </span>
+          <div className="flex-1" />
         </div>
       </div>
     </div>
