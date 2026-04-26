@@ -40,7 +40,7 @@ import {
   DollarSign,
   ChevronRight,
 } from "lucide-react";
-import Image from "next/image";
+import { CldImage } from "next-cloudinary";
 import { useRouter } from "next/navigation";
 
 interface PropertyDetailPanelProps {
@@ -73,12 +73,13 @@ export function PropertyDetailPanel({
       {/* Header image */}
       <div className="relative h-52 shrink-0 overflow-hidden">
         {property.photos[0] ? (
-          <Image
+          <CldImage
             src={property.photos[0]}
             alt={property.location.address}
             fill
             className="object-cover"
             sizes="384px"
+            deliveryType="fetch"
           />
         ) : (
           <div className="w-full h-full bg-secondary flex items-center justify-center">

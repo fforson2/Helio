@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { v2 as cloudinary } from "cloudinary";
 import { Property } from "@/types/property";
+
+cloudinary.config({
+  cloud_name: process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -57,6 +64,20 @@ export async function POST(req: NextRequest) {
   const prompt = buildSchematicPrompt(property);
   const model = process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1";
 
+  // Return existing floor plan from Cloudinary if already generated
+  try {
+    const existing = await cloudinary.api.resource(`helio/floor-plans/${property.id}`);
+    if (existing?.secure_url) {
+      return NextResponse.json({
+        imageUrl: existing.secure_url,
+        caption: `Schematic for ${property.location.address} — ${property.details.beds}bd/${property.details.baths}ba · ${property.details.sqft.toLocaleString()} sqft`,
+        prompt,
+      });
+    }
+  } catch {
+    // Not found — fall through to generate
+  }
+
   try {
     const res = await fetch("https://api.openai.com/v1/images/generations", {
       method: "POST",
@@ -82,14 +103,36 @@ export async function POST(req: NextRequest) {
 
     const data = await res.json();
     const item = data.data?.[0];
-    let imageUrl: string | undefined = item?.url;
-    if (!imageUrl && item?.b64_json) {
-      imageUrl = `data:image/png;base64,${item.b64_json}`;
-    }
+    const rawUrl: string | undefined = item?.url;
+    const b64: string | undefined = item?.b64_json;
 
-    if (!imageUrl) {
+    if (!rawUrl && !b64) {
       return jsonError("No image returned from provider", 502);
     }
+
+    const cloudinaryUrl = await new Promise<string>((resolve, reject) => {
+      const opts = {
+        folder: "helio/floor-plans",
+        public_id: property.id,
+        overwrite: true,
+        resource_type: "image" as const,
+      };
+
+      if (b64) {
+        const buffer = Buffer.from(b64, "base64");
+        const stream = cloudinary.uploader.upload_stream(opts, (err, result) => {
+          if (err || !result) return reject(err ?? new Error("No result from Cloudinary"));
+          resolve(result.secure_url);
+        });
+        stream.end(buffer);
+      } else {
+        cloudinary.uploader.upload(rawUrl!, opts)
+          .then((r) => resolve(r.secure_url))
+          .catch(reject);
+      }
+    });
+
+    let imageUrl: string = cloudinaryUrl;
 
     return NextResponse.json({
       imageUrl,

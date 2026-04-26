@@ -6,9 +6,10 @@ const nextConfig: NextConfig = {
       { hostname: "images.unsplash.com" },
       { hostname: "maps.googleapis.com" },
       { hostname: "maps.gstatic.com" },
+      { hostname: "res.cloudinary.com" },
     ],
   },
-  serverExternalPackages: ["jspdf", "better-sqlite3"],
+  serverExternalPackages: ["jspdf", "better-sqlite3", "cloudinary"],
 };
 
 export default nextConfig;
