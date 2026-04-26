@@ -55,9 +55,9 @@ export default function DashboardLayout({
   }, [properties.length, setSearchError, setSearchResults, setSearching]);
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="flex h-dvh flex-col overflow-hidden bg-background">
       <DashboardNav />
-      <main className="flex-1 flex flex-col">{children}</main>
+      <main className="flex min-h-0 flex-1 flex-col">{children}</main>
     </div>
   );
 }

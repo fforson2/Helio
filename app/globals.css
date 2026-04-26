@@ -119,6 +119,90 @@ body {
   transform: scale(1.12);
 }
 
+/* Mapbox price markers */
+.mapboxgl-marker {
+  z-index: 1;
+}
+
+.mapboxgl-marker:has(.map-price-marker--selected) {
+  z-index: 5;
+}
+
+.map-price-marker {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  transform: translateZ(0);
+  transition: transform 140ms ease;
+}
+
+.map-price-marker:hover {
+  transform: translateY(-2px) scale(1.04);
+}
+
+.map-price-marker__label {
+  max-width: 74px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 999px;
+  border: 1px solid oklch(0.24 0 0);
+  background: oklch(0.10 0 0 / 0.92);
+  color: oklch(0.92 0 0);
+  padding: 3px 7px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(8px);
+}
+
+.map-price-marker__pin {
+  width: 7px;
+  height: 7px;
+  margin-top: -1px;
+  border-radius: 999px;
+  border: 1px solid white;
+  background: currentColor;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
+.map-price-marker--blue {
+  color: var(--color-helio-blue);
+}
+
+.map-price-marker--green {
+  color: var(--color-helio-green);
+}
+
+.map-price-marker--muted {
+  color: oklch(0.70 0 0);
+}
+
+.map-price-marker--blue .map-price-marker__label,
+.map-price-marker--green .map-price-marker__label {
+  border-color: currentColor;
+}
+
+.map-price-marker--selected {
+  transform: translateY(-3px) scale(1.16);
+}
+
+.map-price-marker--selected .map-price-marker__label {
+  max-width: 92px;
+  background: var(--color-helio-blue);
+  border-color: white;
+  color: white;
+}
+
+.map-price-marker--selected .map-price-marker__pin {
+  color: var(--color-helio-blue);
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
