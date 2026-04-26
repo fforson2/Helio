@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useUserStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import {
@@ -9,7 +10,6 @@ import {
   Search,
   FileText,
   LayoutDashboard,
-  Home,
   User,
   Settings,
 } from "lucide-react";
@@ -21,6 +21,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { triggerHelioEntryAnimation } from "@/components/layout/helio-entry-animation";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
@@ -44,14 +45,28 @@ export function DashboardNav() {
     .map((part) => part[0]?.toUpperCase() ?? "")
     .join("");
 
+  function handleHomeClick() {
+    triggerHelioEntryAnimation();
+    window.setTimeout(() => {
+      router.push("/dashboard");
+    }, 180);
+  }
+
   return (
     <header className="sticky top-0 z-50 flex h-12 items-center gap-4 border-b border-white/8 bg-[#111214]/95 px-4 backdrop-blur-xl">
       <button
-        onClick={() => router.push("/")}
+        onClick={handleHomeClick}
         className="flex shrink-0 items-center gap-2 pr-2"
       >
-        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-[#23173d] ring-1 ring-violet-400/20">
-          <Home className="h-3.5 w-3.5 text-violet-300" />
+        <div className="relative h-7 w-7 overflow-hidden rounded-md ring-1 ring-cyan-300/20">
+          <Image
+            src="/helio-mark-clean.png"
+            alt="Helio"
+            fill
+            sizes="28px"
+            className="object-cover"
+            priority
+          />
         </div>
         <span className="hidden text-xs font-semibold tracking-[0.28em] text-white/90 sm:block">
           HELIO
