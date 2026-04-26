@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
   const description = await generateNarrative({
     systemPrompt:
       "You write vivid, specific real estate property descriptions for virtual tour prompts. Be evocative and detailed about the architecture, spaces, and setting. 3–5 sentences. No marketing clichés.",
-    prompt: `Write a rich virtual tour description for this property based on its RentCast listing data:\n\n${context}`,
+    prompt: `Write a rich virtual tour description for this property based on its listing data:\n\n${context}`,
     fallback: `${property.details.beds}-bedroom, ${property.details.baths}-bathroom ${property.details.propertyType.replace(/_/g, " ")} at ${property.location.address}, ${property.location.city}. Built in ${property.details.yearBuilt}, ${property.details.sqft.toLocaleString()} sqft.${features ? ` Features include ${features}.` : ""}`,
   });
 
