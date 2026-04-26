@@ -32,6 +32,86 @@ const MUST_HAVE_HINTS = [
   "views",
 ];
 
+const STATE_ALIASES: Record<string, string> = {
+  alabama: "AL",
+  alaska: "AK",
+  arizona: "AZ",
+  arkansas: "AR",
+  california: "CA",
+  colorado: "CO",
+  connecticut: "CT",
+  delaware: "DE",
+  florida: "FL",
+  georgia: "GA",
+  hawaii: "HI",
+  idaho: "ID",
+  illinois: "IL",
+  indiana: "IN",
+  iowa: "IA",
+  kansas: "KS",
+  kentucky: "KY",
+  louisiana: "LA",
+  maine: "ME",
+  maryland: "MD",
+  massachusetts: "MA",
+  michigan: "MI",
+  minnesota: "MN",
+  mississippi: "MS",
+  missouri: "MO",
+  montana: "MT",
+  nebraska: "NE",
+  nevada: "NV",
+  "new hampshire": "NH",
+  "new jersey": "NJ",
+  "new mexico": "NM",
+  "new york": "NY",
+  "north carolina": "NC",
+  "north dakota": "ND",
+  ohio: "OH",
+  oklahoma: "OK",
+  oregon: "OR",
+  pennsylvania: "PA",
+  "rhode island": "RI",
+  "south carolina": "SC",
+  "south dakota": "SD",
+  tennessee: "TN",
+  texas: "TX",
+  utah: "UT",
+  vermont: "VT",
+  virginia: "VA",
+  washington: "WA",
+  "west virginia": "WV",
+  wisconsin: "WI",
+  wyoming: "WY",
+  dc: "DC",
+  "district of columbia": "DC",
+};
+
+function extractStateOrZipTargets(query: string) {
+  const targets: string[] = [];
+  const lower = query.toLowerCase();
+
+  const zipMatches = lower.match(/\b\d{5}(?:-\d{4})?\b/g) ?? [];
+  for (const zip of zipMatches) {
+    targets.push(zip.slice(0, 5));
+  }
+
+  const tokens = lower.split(/[^a-z]+/).filter(Boolean);
+  for (const token of tokens) {
+    if (/^[a-z]{2}$/.test(token) && Object.values(STATE_ALIASES).includes(token.toUpperCase())) {
+      targets.push(token.toUpperCase());
+    }
+  }
+
+  for (const [name, code] of Object.entries(STATE_ALIASES)) {
+    if (lower.includes(name)) {
+      targets.push(code);
+    }
+  }
+
+  return Array.from(new Set(targets));
+}
+
 function parseBudget(text: string) {
   const underMatch = text.match(/(?:under|below|max(?:imum)? of?)\s*\$?([\d.,]+)\s*(m|k)?/i);
   if (underMatch) {
@@ -109,6 +189,13 @@ function inferIntentFallback(query: string, userPreferences?: Partial<BuyerPrefe
   const matchedLocations = KNOWN_LOCATIONS.filter((location) => lower.includes(location.toLowerCase()));
   if (matchedLocations.length > 0) {
     baseFilters.targetNeighborhoods = matchedLocations;
+  }
+
+  if ((baseFilters.targetNeighborhoods?.length ?? 0) === 0) {
+    const stateOrZipTargets = extractStateOrZipTargets(query);
+    if (stateOrZipTargets.length > 0) {
+      baseFilters.targetNeighborhoods = stateOrZipTargets;
+    }
   }
 
   const mustHaves = MUST_HAVE_HINTS.filter((hint) => lower.includes(hint));
@@ -320,6 +407,7 @@ Return only JSON with this shape:
   "clarifications": string[]
 }
 Known neighborhoods/cities: ${KNOWN_LOCATIONS.join(", ")}
+If the query specifies a US state or ZIP code, preserve that in targetNeighborhoods using a 2-letter state code or 5-digit ZIP.
 User preferences: ${JSON.stringify(userPreferences ?? {})}
 Query: ${query}`;
 

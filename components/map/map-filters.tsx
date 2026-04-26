@@ -22,7 +22,7 @@ const PROPERTY_TYPES = [
 ];
 
 export function MapFilters({ filters, onChange, onClose }: MapFiltersProps) {
-  const priceMin = filters.minPrice ?? 200_000;
+  const priceMin = filters.minPrice ?? 0;
   const priceMax = filters.maxPrice ?? 5_000_000;
   const beds = filters.minBeds ?? 0;
   const baths = filters.minBaths ?? 0;
@@ -56,7 +56,7 @@ export function MapFilters({ filters, onChange, onClose }: MapFiltersProps) {
           </span>
         </div>
         <Slider
-          min={200_000}
+          min={0}
           max={5_000_000}
           step={50_000}
           value={[priceMin, priceMax]}
