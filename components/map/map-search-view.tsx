@@ -5,7 +5,7 @@ import { usePropertyStore, useUserStore } from "@/lib/store";
 import { PropertyCard } from "@/components/property/property-card";
 import { PropertyDetailPanel } from "@/components/property/property-detail-panel";
 import { MapFilters } from "@/components/map/map-filters";
-import { GoogleMap } from "@/components/map/google-map";
+import { MapboxMap } from "@/components/map/mapbox-map";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -132,14 +132,14 @@ export function MapSearchView({ listOnly = false }: MapSearchViewProps) {
   }, [isSearching, searchError]);
 
   return (
-    <div className="flex-1 flex overflow-hidden relative">
+    <div className="relative flex min-h-0 flex-1 overflow-hidden">
       <div
         className={cn(
-          "flex flex-col border-r border-border bg-card/30",
+          "flex min-h-0 flex-col border-r border-border bg-card/30",
           listOnly ? "w-full" : "w-96 shrink-0"
         )}
       >
-        <div className="p-3 border-b border-border space-y-3">
+        <div className="space-y-3 border-b border-border p-3">
           <div className="flex items-start gap-2">
             <div className="flex-1 space-y-1">
               <span className="text-sm font-medium">{properties.length} properties</span>
@@ -237,8 +237,8 @@ export function MapSearchView({ listOnly = false }: MapSearchViewProps) {
       </div>
 
       {!listOnly && (
-        <div className="flex-1 relative">
-          <GoogleMap
+        <div className="relative min-h-0 flex-1">
+          <MapboxMap
             properties={mapProperties}
             selectedId={selectedPropertyId}
             onSelectProperty={selectProperty}
@@ -254,7 +254,7 @@ export function MapSearchView({ listOnly = false }: MapSearchViewProps) {
       {selectedProperty && (
         <div
           className={cn(
-            "w-96 shrink-0 border-l border-border bg-card/50 flex flex-col",
+            "flex min-h-0 w-96 shrink-0 flex-col border-l border-border bg-card/50",
             listOnly && "absolute right-0 top-0 bottom-0 z-10 shadow-2xl"
           )}
         >
