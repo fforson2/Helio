@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { Loader2, Maximize2, Pause, Play, RotateCcw, Volume2, VolumeX } from "lucide-react";
+import { Camera, Check, Loader2, Maximize2, Pause, Play, RotateCcw, Volume2, VolumeX } from "lucide-react";
 
 /* ─────────────────────────────────────────────────────────────
    Types
@@ -609,6 +609,12 @@ const DEFAULT_STATS: PropertyStats = {
   pool: false, garage: true, basement: false, stories: 1,
 };
 
+function GlCapture({ glRef }: { glRef: React.MutableRefObject<THREE.WebGLRenderer | null> }) {
+  const { gl } = useThree();
+  glRef.current = gl;
+  return null;
+}
+
 export function Tour3DView({
   addressLine,
   description,
@@ -624,12 +630,15 @@ export function Tour3DView({
   const [playing, setPlaying] = useState(true);
   const [ready, setReady]     = useState(false);
   const [dp, setDp]           = useState(0);
+  const [saving, setSaving]        = useState(false);
+  const [saved, setSaved]          = useState(false);
   const [narrationEnabled, setNarrationEnabled] = useState(true);
 
   const playingRef   = useRef(true);
   const progressRef  = useRef(0);
   const resetRef     = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const glRef        = useRef<THREE.WebGLRenderer | null>(null);
   const audioRef     = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => { playingRef.current = playing; }, [playing]);
@@ -698,6 +707,24 @@ export function Tour3DView({
     document.fullscreenElement ? document.exitFullscreen() : el.requestFullscreen().catch(() => {});
   }, []);
 
+  const handleSave = useCallback(async () => {
+    if (!glRef.current || saving) return;
+    setSaving(true);
+    try {
+      const imageData = glRef.current.domElement.toDataURL("image/png");
+      const publicId = `tour-${addressLine.replace(/[^a-zA-Z0-9]/g, "-").slice(0, 60)}-${Date.now()}`;
+      await fetch("/api/tour/screenshot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageData, publicId }),
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } finally {
+      setSaving(false);
+    }
+  }, [addressLine, saving]);
+
   // Zone label for current position
   const currentZone = cfg.zones[Math.min(Math.floor(dp * cfg.zones.length), cfg.zones.length - 1)];
   const zoneLabel: Record<string, string> = {
@@ -724,6 +751,7 @@ export function Tour3DView({
           <Suspense fallback={null}>
             <Scene cfg={cfg} playingRef={playingRef} progressRef={progressRef} resetRef={resetRef} />
           </Suspense>
+          <GlCapture glRef={glRef} />
         </Canvas>
 
         {/* Zone label */}
@@ -777,6 +805,15 @@ export function Tour3DView({
                 ) : (
                   <VolumeX className="w-3.5 h-3.5" />
                 )}
+              </button>
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving}
+                className="text-white/60 hover:text-white disabled:opacity-40"
+                title="Save to Cloudinary"
+              >
+                {saved ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Camera className="w-3.5 h-3.5" />}
               </button>
               <button type="button" onClick={handleFullscreen} className="text-white/60 hover:text-white">
                 <Maximize2 className="w-3.5 h-3.5" />
