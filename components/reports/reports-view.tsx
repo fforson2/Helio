@@ -7,6 +7,7 @@ import {
   useUserStore,
   useChatStore,
 } from "@/lib/store";
+import { ChatMessageBubble } from "@/components/chat/chat-message-bubble";
 import { Property } from "@/types/property";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
@@ -16,7 +17,6 @@ import {
   Send,
   Loader2,
   Bot,
-  User,
   Download,
   CheckCircle2,
   Bookmark,
@@ -343,9 +343,9 @@ export function ReportsView() {
   }
 
   return (
-    <div className="flex-1 flex overflow-hidden relative">
+    <div className="relative flex flex-1 min-h-0 overflow-hidden">
       {/* ── Left sidebar ─────────────────────────────────────────── */}
-      <div className="w-52 shrink-0 flex flex-col border-r border-border bg-card/20">
+      <div className="flex w-52 min-h-0 shrink-0 flex-col border-r border-border bg-card/20">
         <div className="p-2.5 border-b border-border">
           <div className="flex rounded-lg bg-secondary/40 p-0.5">
             {(["properties", "saved"] as const).map((tab) => (
@@ -374,7 +374,7 @@ export function ReportsView() {
           </span>
         </div>
 
-        <ScrollArea className="flex-1">
+        <ScrollArea className="min-h-0 flex-1">
           <div className="p-2 space-y-2">
             {displayProperties.length === 0 && (
               <div className="py-10 text-center px-3">
@@ -417,7 +417,7 @@ export function ReportsView() {
       </div>
 
       {/* ── Main AI panel ─────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {selectedProperty && (
           <div className="border-b border-border bg-card/40 px-5 py-2 flex items-center gap-3 text-xs">
             <div className="flex-1 min-w-0">
@@ -455,10 +455,10 @@ export function ReportsView() {
         )}
 
         <ScrollArea
-          className="flex-1"
+          className="min-h-0 flex-1"
           ref={scrollRef as React.RefObject<HTMLDivElement>}
         >
-          <div className="max-w-2xl mx-auto px-6 py-8">
+          <div className="mx-auto max-w-2xl px-6 py-8">
             {messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center min-h-[52vh] gap-7 text-center">
                 <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center shadow-xl shadow-primary/25">
@@ -495,75 +495,14 @@ export function ReportsView() {
                 </div>
               </div>
             ) : (
-              <div className="space-y-4 pb-2">
+              <div className="space-y-4 pb-4">
                 {messages.map((message) => (
-                  <div
+                  <ChatMessageBubble
                     key={message.id}
-                    className={cn(
-                      "flex gap-3",
-                      message.role === "user" ? "flex-row-reverse" : "flex-row"
-                    )}
-                  >
-                    <div
-                      className={cn(
-                        "w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5",
-                        message.role === "user"
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-card border border-border"
-                      )}
-                    >
-                      {message.role === "user" ? (
-                        <User className="w-3.5 h-3.5" />
-                      ) : (
-                        <Bot className="w-3.5 h-3.5 text-primary" />
-                      )}
-                    </div>
-                    <div
-                      className={cn(
-                        "max-w-[80%] rounded-xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap",
-                        message.role === "user"
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-card border border-border"
-                      )}
-                    >
-                      {message.imageUrl && (
-                        <div className="mb-2 -mx-1">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={message.imageUrl}
-                            alt={message.imageCaption ?? "Floor plan"}
-                            className="rounded-lg border border-border max-w-full"
-                          />
-                          <button
-                            onClick={() =>
-                              downloadImage(
-                                message.imageUrl!,
-                                message.imageCaption ?? "helio-schematic"
-                              )
-                            }
-                            className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-lg border border-border hover:bg-secondary transition-colors"
-                          >
-                            <Download className="w-3 h-3" />
-                            Download schematic
-                          </button>
-                        </div>
-                      )}
-                      {message.content}
-                      <div
-                        className={cn(
-                          "text-[10px] mt-1.5",
-                          message.role === "user"
-                            ? "text-primary-foreground/50"
-                            : "text-muted-foreground"
-                        )}
-                      >
-                        {new Date(message.timestamp).toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </div>
-                    </div>
-                  </div>
+                    message={message}
+                    onDownloadImage={(url, caption) => downloadImage(url, caption)}
+                    downloadImageLabel="Download schematic"
+                  />
                 ))}
 
                 {isLoading && (
@@ -584,7 +523,7 @@ export function ReportsView() {
           </div>
         </ScrollArea>
 
-        <div className="border-t border-border p-4">
+        <div className="shrink-0 border-t border-border bg-background/95 p-4 backdrop-blur">
           <div className="max-w-2xl mx-auto">
             <div className="flex items-end gap-2 rounded-xl border border-border bg-card/40 px-3 py-2.5 focus-within:border-primary/50 transition-colors">
               <textarea
