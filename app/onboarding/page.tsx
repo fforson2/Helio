@@ -191,7 +191,7 @@ export default function OnboardingPage() {
                   </span>
                 </div>
                 <Slider
-                  min={200_000}
+                  min={0}
                   max={5_000_000}
                   step={50_000}
                   value={priceRange}
@@ -200,7 +200,7 @@ export default function OnboardingPage() {
                   }
                 />
                 <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>$200K</span><span>$5M+</span>
+                  <span>$0</span><span>$5M+</span>
                 </div>
               </div>
 

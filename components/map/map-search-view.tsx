@@ -164,7 +164,7 @@ export function MapSearchView({ listOnly = false }: MapSearchViewProps) {
             <div className="flex-1 space-y-1">
               <span className="text-sm font-medium">{visibleProperties.length} properties</span>
               <div className="text-xs text-muted-foreground line-clamp-2">
-                {searchSummary || "Showing active homes. Search by city, zip code, neighborhood, or home type to narrow the results."}
+                {searchSummary || "Showing active homes. Search by state, zip code, city, neighborhood, or home type to narrow the results."}
               </div>
             </div>
             <Button
@@ -203,7 +203,7 @@ export function MapSearchView({ listOnly = false }: MapSearchViewProps) {
                   runPromptSearch();
                 }
               }}
-              placeholder="Search by city, zip code, neighborhood, or home type..."
+              placeholder="Search by state, zip code, city, neighborhood, or home type..."
               className="h-9"
             />
             <Button onClick={runPromptSearch} disabled={isSearching || !prompt.trim()} className="gap-2">

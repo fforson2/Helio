@@ -18,6 +18,60 @@ const MIN_VISIBLE_LISTINGS = 30;
 const DEFAULT_RENTCAST_PAGE_SIZE = 30;
 const TARGETED_RENTCAST_PAGE_SIZE = 40;
 const DEFAULT_RENTCAST_PROPERTY_TYPES = ["Single Family", "Condo", "Townhouse", "Multi Family"];
+const STATE_ALIASES: Record<string, string> = {
+  alabama: "AL",
+  alaska: "AK",
+  arizona: "AZ",
+  arkansas: "AR",
+  california: "CA",
+  colorado: "CO",
+  connecticut: "CT",
+  delaware: "DE",
+  florida: "FL",
+  georgia: "GA",
+  hawaii: "HI",
+  idaho: "ID",
+  illinois: "IL",
+  indiana: "IN",
+  iowa: "IA",
+  kansas: "KS",
+  kentucky: "KY",
+  louisiana: "LA",
+  maine: "ME",
+  maryland: "MD",
+  massachusetts: "MA",
+  michigan: "MI",
+  minnesota: "MN",
+  mississippi: "MS",
+  missouri: "MO",
+  montana: "MT",
+  nebraska: "NE",
+  nevada: "NV",
+  "new hampshire": "NH",
+  "new jersey": "NJ",
+  "new mexico": "NM",
+  "new york": "NY",
+  "north carolina": "NC",
+  "north dakota": "ND",
+  ohio: "OH",
+  oklahoma: "OK",
+  oregon: "OR",
+  pennsylvania: "PA",
+  "rhode island": "RI",
+  "south carolina": "SC",
+  "south dakota": "SD",
+  tennessee: "TN",
+  texas: "TX",
+  utah: "UT",
+  vermont: "VT",
+  virginia: "VA",
+  washington: "WA",
+  "west virginia": "WV",
+  wisconsin: "WI",
+  wyoming: "WY",
+  dc: "DC",
+  "district of columbia": "DC",
+};
 
 type RentCastListing = {
   id: string;
@@ -258,9 +312,34 @@ function isBroadSearch(filters: SearchFilters, query?: string) {
     !(filters.keywords && filters.keywords.length > 0);
 }
 
-function extractRentCastLocation(filters: SearchFilters) {
+function inferStateOrZipFromQuery(query?: string) {
+  const normalizedQuery = normalizeText(query ?? "");
+  if (!normalizedQuery) return null;
+
+  const zipMatch = normalizedQuery.match(/\b\d{5}\b/);
+  if (zipMatch) {
+    return { zipCode: zipMatch[0] };
+  }
+
+  const tokens = normalizedQuery.split(" ").filter(Boolean);
+  for (const token of tokens) {
+    if (/^[a-z]{2}$/i.test(token) && Object.values(STATE_ALIASES).includes(token.toUpperCase())) {
+      return { state: token.toUpperCase() };
+    }
+  }
+
+  for (const [name, code] of Object.entries(STATE_ALIASES)) {
+    if (normalizedQuery.includes(name)) {
+      return { state: code };
+    }
+  }
+
+  return null;
+}
+
+function extractRentCastLocation(filters: SearchFilters, query?: string) {
   const target = filters.targetNeighborhoods?.[0]?.trim();
-  if (!target) return null;
+  if (!target) return inferStateOrZipFromQuery(query);
 
   const zipMatch = target.match(/\b\d{5}\b/);
   if (zipMatch) {
@@ -271,11 +350,20 @@ function extractRentCastLocation(filters: SearchFilters) {
   if (cityPart && statePart) {
     return {
       city: cityPart,
-      state: statePart.length <= 2 ? statePart.toUpperCase() : DEFAULT_SEARCH_STATE,
+      state: statePart.length <= 2 ? statePart.toUpperCase() : STATE_ALIASES[statePart.toLowerCase()] ?? DEFAULT_SEARCH_STATE,
     };
   }
 
-  return { city: target, state: DEFAULT_SEARCH_STATE };
+  const normalizedTarget = target.toLowerCase();
+  if (STATE_ALIASES[normalizedTarget]) {
+    return { state: STATE_ALIASES[normalizedTarget] };
+  }
+
+  if (/^[a-z]{2}$/i.test(target) && Object.values(STATE_ALIASES).includes(target.toUpperCase())) {
+    return { state: target.toUpperCase() };
+  }
+
+  return inferStateOrZipFromQuery(query) ?? { city: target, state: DEFAULT_SEARCH_STATE };
 }
 
 function buildNeighborhoodStats(drafts: PropertyDraft[]) {
@@ -508,6 +596,7 @@ function matchesBackfillFilters(
       property.location.neighborhood,
       property.location.city,
       property.location.state,
+      property.location.zip,
       property.location.address,
     ]
       .join(" ")
@@ -527,7 +616,7 @@ async function fetchRentCastListingsPage(
   const apiKey = getRentCastApiKey();
   if (!apiKey) return null;
   const broadSearch = isBroadSearch(filters, query);
-  const location = extractRentCastLocation(filters);
+  const location = extractRentCastLocation(filters, query);
 
   const params = new URLSearchParams({
     status: "Active",
@@ -678,7 +767,10 @@ function normalizeText(value: string) {
 
 function parseTargetLocations(filters: SearchFilters) {
   return (filters.targetNeighborhoods ?? [])
-    .map((entry) => normalizeText(entry))
+    .map((entry) => {
+      const normalized = normalizeText(entry);
+      return STATE_ALIASES[normalized] ?? normalized;
+    })
     .filter(Boolean);
 }
 
@@ -691,6 +783,7 @@ function scoreMatch(property: Property, filters: SearchFilters) {
       property.location.neighborhood,
       property.location.city,
       property.location.state,
+      property.location.zip,
       property.location.address,
     ]
       .join(" ")
@@ -735,6 +828,7 @@ function matchesFilters(property: Property, filters: SearchFilters) {
       property.location.neighborhood,
       property.location.city,
       property.location.state,
+      property.location.zip,
       property.location.address,
     ]
       .join(" ")
