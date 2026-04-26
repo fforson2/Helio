@@ -79,6 +79,7 @@ export function PropertyDetailPanel({
             fill
             className="object-cover"
             sizes="384px"
+            loading="eager"
             unoptimized={property.photos[0].includes("maps.googleapis.com")}
           />
         ) : (

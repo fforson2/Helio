@@ -68,6 +68,7 @@ export function PropertyCard({
             fill
             className="object-cover transition-transform duration-300 group-hover:scale-105"
             sizes="384px"
+            loading={isSelected ? "eager" : "lazy"}
             unoptimized={property.photos[0].includes("maps.googleapis.com")}
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
