@@ -14,7 +14,7 @@ import {
 } from "@/lib/format";
 import { getDealScoreColor, getDealScoreBg } from "@/lib/deal-score";
 import { Bookmark, BookmarkCheck, GitCompare, Bed, Bath, Square } from "lucide-react";
-import { CldImage } from "next-cloudinary";
+import Image from "next/image";
 
 interface PropertyCardProps {
   property: Property;
@@ -62,13 +62,13 @@ export function PropertyCard({
       {/* Image */}
       {!compact && property.photos[0] && (
         <div className="relative h-44 overflow-hidden">
-          <CldImage
+          <Image
             src={property.photos[0]}
             alt={property.location.address}
             fill
             className="object-cover transition-transform duration-300 group-hover:scale-105"
             sizes="384px"
-            deliveryType="fetch"
+            unoptimized={property.photos[0].includes("maps.googleapis.com")}
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
 

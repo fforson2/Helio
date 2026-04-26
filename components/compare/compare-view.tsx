@@ -20,7 +20,7 @@ import {
 } from "@/lib/format";
 import { getDealScoreColor, getDealScoreBg } from "@/lib/deal-score";
 import { X, Plus, Map, TrendingUp } from "lucide-react";
-import { CldImage } from "next-cloudinary";
+import Image from "next/image";
 
 export function CompareView() {
   const { properties, propertyMap, comparisonIds, removeFromComparison } = usePropertyStore();
@@ -165,13 +165,13 @@ export function CompareView() {
             >
               <div className="relative h-36 overflow-hidden">
                 {property.photos[0] && (
-                  <CldImage
+                  <Image
                     src={property.photos[0]}
                     alt={property.location.address}
                     fill
                     className="object-cover"
                     sizes="300px"
-                    deliveryType="fetch"
+                    unoptimized={property.photos[0].includes("maps.googleapis.com")}
                   />
                 )}
                 <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
