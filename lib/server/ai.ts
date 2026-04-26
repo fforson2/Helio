@@ -293,6 +293,13 @@ async function callOpenAIText(prompt: string, systemPrompt?: string): Promise<st
   }
 }
 
+export async function generateOpenAIText(input: {
+  prompt: string;
+  systemPrompt?: string;
+}): Promise<string | null> {
+  return callOpenAIText(input.prompt, input.systemPrompt);
+}
+
 export async function generateSearchIntent(query: string, userPreferences?: Partial<BuyerPreferences>): Promise<SearchIntent> {
   const fallback = inferIntentFallback(query, userPreferences);
   const prompt = `You convert home-search requests into structured JSON.
