@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { useChatStore, usePropertyStore, useUserStore } from "@/lib/store";
+import { resolvePropertiesById, useChatStore, usePropertyStore, useUserStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -19,7 +19,14 @@ const QUICK_PROMPTS = [
 
 export function AssistantView() {
   const { messages, isLoading, addMessage, setLoading } = useChatStore();
-  const { properties, savedProperties, activeSearchSessionId, selectedPropertyId } = usePropertyStore();
+  const {
+    properties,
+    propertyMap,
+    activePropertyIds,
+    savedProperties,
+    activeSearchSessionId,
+    selectedPropertyId,
+  } = usePropertyStore();
   const { profile } = useUserStore();
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -28,6 +35,7 @@ export function AssistantView() {
   const [ttsLoadingId, setTtsLoadingId] = useState<string | null>(null);
   const [ttsPlayingId, setTtsPlayingId] = useState<string | null>(null);
   const [ttsCache, setTtsCache] = useState<Record<string, string>>({});
+  const activeProperties = resolvePropertiesById(activePropertyIds, propertyMap, properties);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -171,13 +179,13 @@ export function AssistantView() {
                 </p>
               </div>
 
-              {properties.length > 0 && (
+              {activeProperties.length > 0 && (
                 <div className="space-y-2">
                   <p className="text-xs text-muted-foreground text-center">
-                    Grounded in {properties.length} active search results
+                    Grounded in {activeProperties.length} active search results
                   </p>
                   <div className="flex flex-wrap gap-2 justify-center">
-                    {properties.slice(0, 4).map((property) => (
+                    {activeProperties.slice(0, 4).map((property) => (
                       <div
                         key={property.id}
                         className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-secondary border border-border text-xs"

@@ -10,6 +10,7 @@ import { ChatMessage } from "@/types/session";
 interface PropertyStore {
   properties: Property[];
   propertyMap: Record<string, Property>;
+  activePropertyIds: string[];
   activeSearchSessionId: string | null;
   searchSummary: string;
   searchQuery: string;
@@ -44,6 +45,7 @@ export const usePropertyStore = create<PropertyStore>()(
     (set, get) => ({
       properties: [],
       propertyMap: {},
+      activePropertyIds: [],
       activeSearchSessionId: null,
       searchSummary: "",
       searchQuery: "",
@@ -67,6 +69,7 @@ export const usePropertyStore = create<PropertyStore>()(
           return {
             properties,
             propertyMap,
+            activePropertyIds: properties.map((property) => property.id),
             activeSearchSessionId: session?.id ?? state.activeSearchSessionId,
             searchSummary: summary ?? session?.summary ?? state.searchSummary,
             searchQuery: query ?? session?.query ?? state.searchQuery,
@@ -196,3 +199,14 @@ export const useUIStore = create<UIStore>()((set) => ({
   setMapMode: (mode) => set({ mapMode: mode }),
   setActiveTab: (tab) => set({ activeTab: tab }),
 }));
+
+export function resolvePropertiesById(
+  ids: string[],
+  propertyMap: Record<string, Property>,
+  fallback: Property[] = []
+) {
+  const fallbackMap = new Map(fallback.map((property) => [property.id, property]));
+  return ids
+    .map((id) => propertyMap[id] ?? fallbackMap.get(id))
+    .filter((property): property is Property => Boolean(property));
+}

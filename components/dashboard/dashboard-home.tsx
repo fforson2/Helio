@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useMemo } from "react";
-import { usePropertyStore, useUserStore } from "@/lib/store";
+import { resolvePropertiesById, usePropertyStore, useUserStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import {
   formatFullPrice,
@@ -248,21 +248,27 @@ function Meter({
 
 export function DashboardHome() {
   const router = useRouter();
-  const { properties, propertyMap, savedProperties, isPropertySaved, selectProperty } =
+  const { properties, propertyMap, activePropertyIds, savedProperties, isPropertySaved, selectProperty } =
     usePropertyStore();
   const { profile } = useUserStore();
+  const activeProperties = useMemo(
+    () => resolvePropertiesById(activePropertyIds, propertyMap, properties),
+    [activePropertyIds, propertyMap, properties]
+  );
 
   const savedListings = useMemo(
     () =>
       savedProperties
-        .map((saved) => propertyMap[saved.propertyId] ?? properties.find((property) => property.id === saved.propertyId))
+        .map((saved) => propertyMap[saved.propertyId] ?? activeProperties.find((property) => property.id === saved.propertyId))
         .filter(Boolean) as Property[],
-    [properties, propertyMap, savedProperties]
+    [activeProperties, propertyMap, savedProperties]
   );
 
-  const watchlist = savedListings.length > 0 ? savedListings : properties.slice(0, 3);
-  const portfolioSample = properties.filter((property) => !watchlist.some((item) => item.id === property.id)).slice(0, 2);
-  const activeProperty = savedListings[0] ?? properties[0] ?? null;
+  const watchlist = savedListings.length > 0 ? savedListings : activeProperties.slice(0, 3);
+  const portfolioSample = activeProperties
+    .filter((property) => !watchlist.some((item) => item.id === property.id))
+    .slice(0, 2);
+  const activeProperty = savedListings[0] ?? activeProperties[0] ?? null;
 
   const watchlistCosts = watchlist.map(estimateMonthlyOwnershipCost);
   const totalPortfolioValue = savedListings.reduce((sum, property) => sum + property.price, 0);

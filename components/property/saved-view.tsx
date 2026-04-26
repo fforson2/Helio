@@ -1,6 +1,6 @@
 "use client";
 
-import { usePropertyStore, useUIStore } from "@/lib/store";
+import { resolvePropertiesById, usePropertyStore, useUIStore } from "@/lib/store";
 import { Property } from "@/types/property";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
@@ -8,12 +8,14 @@ import { PropertyCard } from "@/components/property/property-card";
 import { Bookmark, Map } from "lucide-react";
 
 export function SavedView() {
-  const { properties, savedProperties, selectProperty } = usePropertyStore();
+  const { properties, propertyMap, savedProperties, selectProperty } = usePropertyStore();
   const { setActiveTab } = useUIStore();
 
-  const saved = savedProperties
-    .map((s) => properties.find((p) => p.id === s.propertyId))
-    .filter(Boolean) as Property[];
+  const saved = resolvePropertiesById(
+    savedProperties.map((savedProperty) => savedProperty.propertyId),
+    propertyMap,
+    properties
+  );
 
   if (saved.length === 0) {
     return (

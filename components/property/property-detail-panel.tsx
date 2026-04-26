@@ -1,7 +1,7 @@
 "use client";
 
 import { Property } from "@/types/property";
-import { usePropertyStore, useUIStore } from "@/lib/store";
+import { usePropertyStore } from "@/lib/store";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -23,8 +23,8 @@ import {
   X,
   Bookmark,
   BookmarkCheck,
-  GitCompare,
   MessageSquare,
+  Compass,
   MapPin,
   Calendar,
   Home,
@@ -41,6 +41,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 
 interface PropertyDetailPanelProps {
   property: Property;
@@ -51,15 +52,20 @@ export function PropertyDetailPanel({
   property,
   onClose,
 }: PropertyDetailPanelProps) {
-  const { saveProperty, unsaveProperty, isPropertySaved, addToComparison, comparisonIds } =
+  const { saveProperty, unsaveProperty, isPropertySaved, selectProperty } =
     usePropertyStore();
-  const { setActiveTab } = useUIStore();
+  const router = useRouter();
   const saved = isPropertySaved(property.id);
-  const inComparison = comparisonIds.includes(property.id);
   const score = property.dealScore;
 
   function openAssistant() {
-    setActiveTab("assistant");
+    selectProperty(property.id);
+    router.push("/dashboard/agent");
+  }
+
+  function openTour() {
+    selectProperty(property.id);
+    router.push("/dashboard/tour?focus=selected");
   }
 
   return (
@@ -113,16 +119,6 @@ export function PropertyDetailPanel({
           {saved ? "Saved" : "Save"}
         </Button>
         <Button
-          variant={inComparison ? "default" : "outline"}
-          size="sm"
-          className="flex-1 gap-1.5"
-          onClick={() => addToComparison(property.id)}
-          disabled={!inComparison && comparisonIds.length >= 3}
-        >
-          <GitCompare className="w-3.5 h-3.5" />
-          Compare
-        </Button>
-        <Button
           variant="outline"
           size="sm"
           className="flex-1 gap-1.5"
@@ -130,6 +126,17 @@ export function PropertyDetailPanel({
         >
           <MessageSquare className="w-3.5 h-3.5" />
           Ask AI
+        </Button>
+      </div>
+      <div className="px-3 pb-2 border-b border-border">
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full gap-1.5"
+          onClick={openTour}
+        >
+          <Compass className="w-3.5 h-3.5" />
+          Tour
         </Button>
       </div>
 

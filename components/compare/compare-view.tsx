@@ -1,6 +1,6 @@
 "use client";
 
-import { usePropertyStore, useUIStore } from "@/lib/store";
+import { resolvePropertiesById, usePropertyStore, useUIStore } from "@/lib/store";
 import { Property } from "@/types/property";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
@@ -23,12 +23,10 @@ import { X, Plus, Map, TrendingUp } from "lucide-react";
 import Image from "next/image";
 
 export function CompareView() {
-  const { properties, comparisonIds, removeFromComparison } = usePropertyStore();
+  const { properties, propertyMap, comparisonIds, removeFromComparison } = usePropertyStore();
   const { setActiveTab } = useUIStore();
 
-  const compared = comparisonIds
-    .map((id) => properties.find((p) => p.id === id))
-    .filter(Boolean) as Property[];
+  const compared = resolvePropertiesById(comparisonIds, propertyMap, properties);
 
   if (compared.length === 0) {
     return (

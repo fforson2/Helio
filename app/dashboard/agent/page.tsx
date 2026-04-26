@@ -17,6 +17,8 @@ import {
   Mic,
   MicOff,
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 type VoiceState = "idle" | "recording" | "transcribing";
 
@@ -109,7 +111,7 @@ function useVoiceRecorder(onTranscript: (text: string) => void) {
 
 export default function AgentPage() {
   const { messages, isLoading, addMessage, setLoading } = useChatStore();
-  const { properties, savedProperties, activeSearchSessionId, propertyMap } =
+  const { properties, savedProperties, activeSearchSessionId, propertyMap, selectedPropertyId } =
     usePropertyStore();
   const { profile } = useUserStore();
 
@@ -125,6 +127,17 @@ export default function AgentPage() {
   const lastMsgCountRef = useRef(messages.length);
 
   const selectedProperty = agentPropertyId ? propertyMap[agentPropertyId] ?? null : null;
+
+  useEffect(() => {
+    if (selectedPropertyId && propertyMap[selectedPropertyId]) {
+      setAgentPropertyId(selectedPropertyId);
+      return;
+    }
+
+    if (!selectedPropertyId && !agentPropertyId && properties.length > 0) {
+      setAgentPropertyId(properties[0].id);
+    }
+  }, [agentPropertyId, properties, propertyMap, selectedPropertyId]);
 
   const sendMessage = useCallback(
     async (text?: string) => {
@@ -313,13 +326,13 @@ export default function AgentPage() {
   }
 
   return (
-    <div className="flex-1 flex overflow-hidden">
+    <div className="flex-1 min-h-0 flex overflow-hidden">
       <AgentPropertySidebar
         onSelectProperty={setAgentPropertyId}
         selectedPropertyId={agentPropertyId}
       />
 
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 min-h-0 flex flex-col min-w-0">
         {/* Header bar */}
         <div className="h-12 border-b border-border flex items-center justify-between px-5 bg-card/30 shrink-0">
           <p className="text-sm text-muted-foreground">
@@ -386,7 +399,7 @@ export default function AgentPage() {
         ) : (
           /* ---- Chat area ---- */
           <>
-            <ScrollArea className="flex-1 p-5" ref={scrollRef as React.RefObject<HTMLDivElement>}>
+            <ScrollArea className="min-h-0 flex-1 p-5" ref={scrollRef as React.RefObject<HTMLDivElement>}>
               <div className="space-y-4 max-w-2xl mx-auto">
                 {messages.length === 0 && (
                   <div className="text-center py-12 space-y-3">
@@ -453,7 +466,15 @@ export default function AgentPage() {
                           : "bg-card border border-border"
                       )}
                     >
-                      <div className="whitespace-pre-wrap">{message.content}</div>
+                      {message.role === "assistant" ? (
+                        <div className="prose prose-sm prose-invert max-w-none break-words prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0 prose-pre:my-2 prose-pre:overflow-x-auto prose-code:before:content-none prose-code:after:content-none">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {message.content}
+                          </ReactMarkdown>
+                        </div>
+                      ) : (
+                        <div className="whitespace-pre-wrap">{message.content}</div>
+                      )}
                       {message.role === "assistant" && (
                         <div className="mt-2 flex items-center gap-2">
                           <button
@@ -511,7 +532,7 @@ export default function AgentPage() {
             </ScrollArea>
 
             {messages.length > 0 && (
-              <div className="border-t border-border p-4 shrink-0">
+              <div className="border-t border-border bg-background/95 backdrop-blur p-4 shrink-0">
                 <ChatComposer placeholder={`Ask about ${selectedProperty.location.neighborhood}...`} />
               </div>
             )}

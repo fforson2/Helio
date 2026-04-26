@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { Download, Maximize2, Pause, Play, RotateCcw, Volume2 } from "lucide-react";
+import { Maximize2, Pause, Play, RotateCcw, Volume2 } from "lucide-react";
 
 /* ─────────────────────────────────────────────────────────────
    Types
@@ -638,15 +638,6 @@ export function Tour3DView({ addressLine, description, propertyStats, className 
   const elapsed = dp * cfg.duration;
   const fmt = (s: number) => `0:${Math.floor(s).toString().padStart(2, "0")}`;
 
-  const handleDownload = useCallback(() => {
-    const canvas = containerRef.current?.querySelector("canvas");
-    if (!canvas) return;
-    const a = document.createElement("a");
-    a.download = `${addressLine.replace(/[^a-zA-Z0-9]/g, "_")}_tour.png`;
-    a.href = canvas.toDataURL("image/png");
-    a.click();
-  }, [addressLine]);
-
   const handleFullscreen = useCallback(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -738,10 +729,6 @@ export function Tour3DView({ addressLine, description, propertyStats, className 
           onClick={() => { resetRef.current = true; setPlaying(true); }}>
           <RotateCcw className="w-3.5 h-3.5" />
           Restart
-        </Button>
-        <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={handleDownload}>
-          <Download className="w-3.5 h-3.5" />
-          Screenshot
         </Button>
         {stats && (
           <div className="flex items-center gap-2 text-[11px] text-muted-foreground ml-1">

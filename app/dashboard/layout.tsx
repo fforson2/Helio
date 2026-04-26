@@ -22,8 +22,8 @@ export default function DashboardLayout({
 
     let cancelled = false;
     const filters = {};
-    const query = "California homes";
-    const summary = "Active California listings";
+    const query = "homes for sale";
+    const summary = "Active homes for sale";
 
     setSearching(true);
     searchListings({
@@ -43,7 +43,7 @@ export default function DashboardLayout({
       })
       .catch(() => {
         if (cancelled) return;
-        setSearchError("Could not load California listings.");
+        setSearchError("Could not load listings.");
       })
       .finally(() => {
         if (!cancelled) setSearching(false);

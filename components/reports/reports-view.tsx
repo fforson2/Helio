@@ -1,7 +1,12 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { usePropertyStore, useUserStore, useChatStore } from "@/lib/store";
+import {
+  resolvePropertiesById,
+  usePropertyStore,
+  useUserStore,
+  useChatStore,
+} from "@/lib/store";
 import { Property } from "@/types/property";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
@@ -40,9 +45,9 @@ const QUICK_ACTIONS: QuickAction[] = [
   {
     id: "mrkt",
     tag: "MRKT",
-    label: "Market analysis for my watchlist",
+    label: "Market analysis for my saved properties",
     prompt:
-      "Give me a thorough market analysis comparing every property in my watchlist. Cover pricing vs. AVM, neighborhood trends, days-on-market signals, and risk factors. End with a final ranking.",
+      "Give me a thorough market analysis comparing every property in my saved properties. Cover pricing vs. AVM, neighborhood trends, days-on-market signals, and risk factors. End with a final ranking.",
   },
   {
     id: "rprt",
@@ -63,6 +68,7 @@ export function ReportsView() {
   const {
     properties,
     propertyMap,
+    activePropertyIds,
     activeSearchSessionId,
     savedProperties,
     saveProperty,
@@ -73,7 +79,7 @@ export function ReportsView() {
   const { messages, isLoading, addMessage, setLoading, clearMessages } =
     useChatStore();
 
-  const [activeTab, setActiveTab] = useState<"properties" | "watchlist">(
+  const [activeTab, setActiveTab] = useState<"properties" | "saved">(
     "properties"
   );
   const [input, setInput] = useState("");
@@ -100,16 +106,19 @@ export function ReportsView() {
 
   // Saved listings may live outside the current search results, so fall
   // back to the persisted propertyMap for lookups.
-  const savedPropsList = savedProperties
-    .map(
-      (s) =>
-        propertyMap[s.propertyId] ??
-        properties.find((p) => p.id === s.propertyId)
-    )
-    .filter(Boolean) as Property[];
+  const activeProperties = resolvePropertiesById(
+    activePropertyIds,
+    propertyMap,
+    properties
+  );
+  const savedPropsList = resolvePropertiesById(
+    savedProperties.map((saved) => saved.propertyId),
+    propertyMap,
+    properties
+  );
 
   const displayProperties =
-    activeTab === "watchlist" ? savedPropsList : properties;
+    activeTab === "saved" ? savedPropsList : activeProperties;
 
   function downloadImage(url: string, caption: string) {
     const filename = caption
@@ -145,7 +154,7 @@ export function ReportsView() {
   function getSummaryScope(): Property[] {
     if (selectedProperty) return [selectedProperty];
     if (savedPropsList.length > 0) return savedPropsList;
-    return [...properties]
+    return [...activeProperties]
       .sort((a, b) => (b.dealScore?.total ?? 0) - (a.dealScore?.total ?? 0))
       .slice(0, 3);
   }
@@ -154,7 +163,7 @@ export function ReportsView() {
   function getSchematicProperty(): Property | null {
     if (selectedProperty) return selectedProperty;
     if (savedPropsList.length > 0) return savedPropsList[0];
-    const top = [...properties].sort(
+    const top = [...activeProperties].sort(
       (a, b) => (b.dealScore?.total ?? 0) - (a.dealScore?.total ?? 0)
     )[0];
     return top ?? null;
@@ -260,7 +269,7 @@ export function ReportsView() {
     const label =
       scope.length === 1
         ? scope[0].location.address
-        : `${scope.length} watchlist properties`;
+        : `${scope.length} saved properties`;
     addMessage({
       role: "user",
       content: `Email me a property summary for ${label} (${toEmail}).`,
@@ -339,7 +348,7 @@ export function ReportsView() {
       <div className="w-52 shrink-0 flex flex-col border-r border-border bg-card/20">
         <div className="p-2.5 border-b border-border">
           <div className="flex rounded-lg bg-secondary/40 p-0.5">
-            {(["properties", "watchlist"] as const).map((tab) => (
+            {(["properties", "saved"] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -350,7 +359,7 @@ export function ReportsView() {
                     : "text-muted-foreground hover:text-foreground"
                 )}
               >
-                {tab === "properties" ? "Properties" : "Watchlist"}
+                {tab === "properties" ? "Properties" : "Saved"}
               </button>
             ))}
           </div>
@@ -370,7 +379,7 @@ export function ReportsView() {
             {displayProperties.length === 0 && (
               <div className="py-10 text-center px-3">
                 <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  {activeTab === "watchlist"
+                  {activeTab === "saved"
                     ? "No saved properties yet. Bookmark listings from the map."
                     : "No properties found."}
                 </p>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { usePropertyStore } from "@/lib/store";
 import { AgentPropertySidebar } from "@/components/agent/agent-property-sidebar";
 import { Tour3DView } from "@/components/tour/tour-3d-view";
@@ -14,23 +15,34 @@ const DEFAULT_DESCRIPTION =
   "Modern home with clean architectural lines, open floor plan, and abundant natural light throughout.";
 
 export default function TourPage() {
+  const searchParams = useSearchParams();
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null);
   const [descriptionLoading, setDescriptionLoading] = useState(false);
   const [description, setDescription] = useState(DEFAULT_DESCRIPTION);
 
   const properties = usePropertyStore((state) => state.properties);
   const propertyMap = usePropertyStore((state) => state.propertyMap);
+  const globalSelectedPropertyId = usePropertyStore((state) => state.selectedPropertyId);
   const selectedProperty = selectedPropertyId
     ? propertyMap[selectedPropertyId] ??
       properties.find((p) => p.id === selectedPropertyId) ??
       null
     : null;
 
-  // Auto-select first property once loaded
+  // Only carry a selected property into Tour when the user explicitly
+  // launched Tour from a listing action.
   useEffect(() => {
-    if (selectedPropertyId || properties.length === 0) return;
-    setSelectedPropertyId(properties[0].id);
-  }, [properties, selectedPropertyId]);
+    if (selectedPropertyId) return;
+    if (searchParams.get("focus") !== "selected") return;
+    if (globalSelectedPropertyId && propertyMap[globalSelectedPropertyId]) {
+      setSelectedPropertyId(globalSelectedPropertyId);
+      return;
+    }
+    if (globalSelectedPropertyId && properties.some((property) => property.id === globalSelectedPropertyId)) {
+      setSelectedPropertyId(globalSelectedPropertyId);
+      return;
+    }
+  }, [globalSelectedPropertyId, properties, propertyMap, searchParams, selectedPropertyId]);
 
   const photos = useMemo(() => {
     if (!selectedProperty) return [FALLBACK_HERO];

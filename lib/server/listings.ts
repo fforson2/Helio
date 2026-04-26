@@ -11,9 +11,11 @@ import {
 import { getDb } from "@/lib/server/db";
 
 const DEFAULT_SEARCH_STATE = "CA";
-const DEFAULT_SEARCH_SUMMARY = "Active California listings";
+const DEFAULT_SEARCH_SUMMARY = "Active homes for sale";
 const RENTCAST_BASE_URL = "https://api.rentcast.io/v1";
-const DEFAULT_RENTCAST_PAGE_SIZE = 10;
+const MAX_VISIBLE_LISTINGS = 30;
+const MIN_VISIBLE_LISTINGS = 30;
+const DEFAULT_RENTCAST_PAGE_SIZE = 30;
 const TARGETED_RENTCAST_PAGE_SIZE = 40;
 const DEFAULT_RENTCAST_PROPERTY_TYPES = ["Single Family", "Condo", "Townhouse", "Multi Family"];
 
@@ -236,12 +238,12 @@ function buildQueryRange(min?: number, max?: number) {
   return `${min ?? "*"}:${max ?? "*"}`;
 }
 
-function isBroadCaliforniaSearch(filters: SearchFilters, query?: string) {
+function isBroadSearch(filters: SearchFilters, query?: string) {
   const normalizedQuery = query?.trim().toLowerCase() ?? "";
   const hasExplicitQuery =
     normalizedQuery.length > 0 &&
-    normalizedQuery !== "california homes" &&
-    normalizedQuery !== "active california listings";
+    normalizedQuery !== "homes for sale" &&
+    normalizedQuery !== "active homes for sale";
 
   return !hasExplicitQuery &&
     !filters.minPrice &&
@@ -444,18 +446,96 @@ function cacheProperties(properties: Property[]) {
   tx(properties);
 }
 
-async function fetchRentCastListings(filters: SearchFilters, query?: string): Promise<Property[] | null> {
+function dedupeProperties(properties: Property[]) {
+  const seen = new Set<string>();
+  return properties.filter((property) => {
+    if (seen.has(property.id)) return false;
+    seen.add(property.id);
+    return true;
+  });
+}
+
+function buildBackfillFilters(filters: SearchFilters) {
+  const candidates: SearchFilters[] = [];
+  const pushCandidate = (candidate: SearchFilters) => {
+    if (Object.keys(candidate).length === 0) {
+      if (!candidates.some((existing) => Object.keys(existing).length === 0)) {
+        candidates.push(candidate);
+      }
+      return;
+    }
+
+    const signature = JSON.stringify(candidate);
+    const hasMatch = candidates.some((existing) => JSON.stringify(existing) === signature);
+    if (!hasMatch) candidates.push(candidate);
+  };
+
+  if (filters.targetNeighborhoods?.length || filters.propertyTypes?.length) {
+    pushCandidate({
+      ...(filters.targetNeighborhoods?.length ? { targetNeighborhoods: filters.targetNeighborhoods } : {}),
+      ...(filters.propertyTypes?.length ? { propertyTypes: filters.propertyTypes } : {}),
+    });
+  }
+
+  if (filters.targetNeighborhoods?.length) {
+    pushCandidate({ targetNeighborhoods: filters.targetNeighborhoods });
+  }
+
+  if (filters.propertyTypes?.length) {
+    pushCandidate({ propertyTypes: filters.propertyTypes });
+  }
+
+  pushCandidate({});
+
+  return candidates;
+}
+
+function matchesBackfillFilters(
+  property: Property,
+  filters: SearchFilters,
+  options?: { preserveLocation?: boolean }
+) {
+  if (filters.listingType && property.listingType !== filters.listingType) return false;
+
+  const propertyTypes = (filters.propertyTypes ?? []) as string[];
+  if (propertyTypes.length > 0 && !propertyTypes.includes(property.details.propertyType)) {
+    return false;
+  }
+
+  const locations = parseTargetLocations(filters);
+  if (options?.preserveLocation !== false && locations.length > 0) {
+    const haystack = [
+      property.location.neighborhood,
+      property.location.city,
+      property.location.state,
+      property.location.address,
+    ]
+      .join(" ")
+      .replace(/,/g, " ");
+    const locationMatches = locations.some((entry) => includesNeedle(haystack, entry));
+    if (!locationMatches) return false;
+  }
+
+  return true;
+}
+
+async function fetchRentCastListingsPage(
+  filters: SearchFilters,
+  query?: string,
+  limitOverride?: number
+): Promise<Property[] | null> {
   const apiKey = getRentCastApiKey();
   if (!apiKey) return null;
-  const isBroadSearch = isBroadCaliforniaSearch(filters, query);
+  const broadSearch = isBroadSearch(filters, query);
   const location = extractRentCastLocation(filters);
 
   const params = new URLSearchParams({
-    state: location?.state ?? DEFAULT_SEARCH_STATE,
     status: "Active",
-    limit: String(isBroadSearch ? DEFAULT_RENTCAST_PAGE_SIZE : TARGETED_RENTCAST_PAGE_SIZE),
+    limit: String(limitOverride ?? (broadSearch ? DEFAULT_RENTCAST_PAGE_SIZE : TARGETED_RENTCAST_PAGE_SIZE)),
     offset: "0",
   });
+
+  if (location?.state) params.set("state", location.state);
 
   if (location?.city) params.set("city", location.city);
   if (location?.zipCode) {
@@ -503,6 +583,25 @@ async function fetchRentCastListings(filters: SearchFilters, query?: string): Pr
   }
 }
 
+async function fetchRentCastListings(filters: SearchFilters, query?: string): Promise<Property[] | null> {
+  const primary = await fetchRentCastListingsPage(filters, query);
+  if (!primary || primary.length >= MIN_VISIBLE_LISTINGS) return primary;
+
+  const initialSignature = JSON.stringify(filters);
+  let combined = [...primary];
+
+  for (const candidate of buildBackfillFilters(filters)) {
+    if (JSON.stringify(candidate) === initialSignature) continue;
+    const supplemental = await fetchRentCastListingsPage(candidate, query, TARGETED_RENTCAST_PAGE_SIZE);
+    if (!supplemental?.length) continue;
+
+    combined = dedupeProperties([...combined, ...supplemental]);
+    if (combined.length >= MIN_VISIBLE_LISTINGS) break;
+  }
+
+  return combined;
+}
+
 function buildSearchText(property: Property) {
   return [
     property.location.address,
@@ -539,6 +638,34 @@ function getAllProperties(): Property[] {
 
 function includesNeedle(value: string, needle: string) {
   return normalizeText(value).includes(normalizeText(needle));
+}
+
+function looksLikeAddressQuery(query?: string) {
+  const normalized = normalizeText(query ?? "");
+  return /\b\d{1,6}\b/.test(normalized) && /\b(st|street|ave|avenue|rd|road|dr|drive|ln|lane|blvd|boulevard|ct|court|way|pl|place|cir|circle|trl|trail|pkwy|parkway|ter|terrace)\b/.test(normalized);
+}
+
+function extractAddressNeedle(query?: string) {
+  const normalized = normalizeText(query ?? "");
+  if (!normalized) return null;
+
+  const stripped = normalized
+    .replace(/^(homes?|houses?|properties|listings)\s+for\s+(sale|rent)\s+in\s+/, "")
+    .replace(/^(homes?|houses?|properties|listings)\s+in\s+/, "")
+    .trim();
+
+  return looksLikeAddressQuery(stripped) ? stripped : null;
+}
+
+function matchesAddressQuery(property: Property, addressNeedle: string) {
+  const searchable = [
+    property.location.address,
+    property.location.city,
+    property.location.state,
+    property.location.zip,
+  ].join(" ");
+
+  return includesNeedle(searchable, addressNeedle);
 }
 
 function normalizeText(value: string) {
@@ -635,7 +762,7 @@ function matchesFilters(property: Property, filters: SearchFilters) {
 
 function deriveSearchSummary(filters: SearchFilters) {
   const segments: string[] = [];
-  segments.push(filters.listingType === "for_rent" ? "California rentals" : "California homes for sale");
+  segments.push(filters.listingType === "for_rent" ? "Rentals" : "Homes for sale");
   if (filters.targetNeighborhoods?.length) {
     segments.push(`in ${filters.targetNeighborhoods.join(", ")}`);
   }
@@ -739,9 +866,40 @@ export async function searchListings(input: {
 }): Promise<ListingsSearchResponse> {
   const liveProperties = await fetchRentCastListings(input.filters, input.query);
   const sourceProperties = liveProperties ?? getAllProperties();
-  const properties = sourceProperties
+  const addressNeedle = extractAddressNeedle(input.query);
+  const addressMatches = addressNeedle
+    ? sourceProperties.filter((property) => matchesAddressQuery(property, addressNeedle))
+    : [];
+  const strictMatches = sourceProperties
     .filter((property) => matchesFilters(property, input.filters))
     .sort((a, b) => scoreMatch(b, input.filters) - scoreMatch(a, input.filters));
+  const prioritizedStrictMatches = dedupeProperties([
+    ...addressMatches.sort((a, b) => scoreMatch(b, input.filters) - scoreMatch(a, input.filters)),
+    ...strictMatches,
+  ]);
+  const strictIds = new Set(prioritizedStrictMatches.map((property) => property.id));
+  const remainingSlots = Math.max(MIN_VISIBLE_LISTINGS - prioritizedStrictMatches.length, 0);
+  const contextualRelatedMatches =
+    remainingSlots === 0
+      ? []
+      : sourceProperties
+          .filter((property) => !strictIds.has(property.id))
+          .filter((property) => matchesBackfillFilters(property, input.filters))
+          .sort((a, b) => scoreMatch(b, input.filters) - scoreMatch(a, input.filters))
+          .slice(0, remainingSlots);
+  const contextualIds = new Set(contextualRelatedMatches.map((property) => property.id));
+  const broadRelatedMatches =
+    contextualRelatedMatches.length >= remainingSlots
+      ? []
+      : sourceProperties
+          .filter((property) => !strictIds.has(property.id) && !contextualIds.has(property.id))
+          .filter((property) =>
+            matchesBackfillFilters(property, input.filters, { preserveLocation: false })
+          )
+          .sort((a, b) => scoreMatch(b, input.filters) - scoreMatch(a, input.filters))
+          .slice(0, remainingSlots - contextualRelatedMatches.length);
+  const relatedMatches = [...contextualRelatedMatches, ...broadRelatedMatches];
+  const properties = [...prioritizedStrictMatches, ...relatedMatches].slice(0, MAX_VISIBLE_LISTINGS);
 
   const summary =
     input.summary?.trim() || deriveSearchSummary(input.filters) || DEFAULT_SEARCH_SUMMARY;

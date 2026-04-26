@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { usePropertyStore } from "@/lib/store";
+import { resolvePropertiesById, usePropertyStore } from "@/lib/store";
 import { Property } from "@/types/property";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
@@ -102,20 +102,25 @@ export function AgentPropertySidebar({
   onSelectProperty: (id: string | null) => void;
   selectedPropertyId: string | null;
 }) {
-  const { properties, savedProperties, propertyMap } = usePropertyStore();
+  const { properties, savedProperties, propertyMap, activePropertyIds } = usePropertyStore();
   const [activeTab, setActiveTab] = useState<SidebarTab>("properties");
+  const activeProperties = resolvePropertiesById(
+    activePropertyIds,
+    propertyMap,
+    properties
+  );
 
-  const savedProps = savedProperties
-    .map((s) => propertyMap[s.propertyId])
-    .filter((p): p is Property => Boolean(p));
+  const savedProps = resolvePropertiesById(
+    savedProperties.map((saved) => saved.propertyId),
+    propertyMap,
+    properties
+  );
 
-  const featured = properties.slice(0, 3);
-  const remaining = properties.slice(3);
-
-  const displayList = activeTab === "watchlist" ? savedProps : properties;
+  const featured = activeProperties.slice(0, 3);
+  const remaining = activeProperties.slice(3);
 
   return (
-    <div className="w-72 shrink-0 border-r border-border bg-card/30 flex flex-col">
+    <div className="w-72 min-h-0 shrink-0 border-r border-border bg-card/30 flex flex-col">
       <div className="p-3 border-b border-border">
         <div className="flex rounded-lg bg-muted/50 p-0.5">
           {(["properties", "watchlist"] as const).map((tab) => (
@@ -135,7 +140,7 @@ export function AgentPropertySidebar({
         </div>
       </div>
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1">
         <div className="p-3 space-y-4">
           {activeTab === "properties" ? (
             <>
@@ -144,7 +149,7 @@ export function AgentPropertySidebar({
                   Listings
                 </span>
                 <span className="text-[10px] font-bold text-primary bg-primary/10 rounded-full w-6 h-6 flex items-center justify-center">
-                  {properties.length}
+                  {activeProperties.length}
                 </span>
               </div>
 

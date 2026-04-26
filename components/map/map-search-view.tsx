@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { usePropertyStore, useUserStore } from "@/lib/store";
+import { resolvePropertiesById, usePropertyStore, useUserStore } from "@/lib/store";
 import { PropertyCard } from "@/components/property/property-card";
 import { PropertyDetailPanel } from "@/components/property/property-detail-panel";
 import { MapFilters } from "@/components/map/map-filters";
@@ -18,7 +18,11 @@ interface MapSearchViewProps {
   listOnly?: boolean;
 }
 
-const MAX_MAP_MARKERS = 50;
+const MAX_MAP_MARKERS = 30;
+
+function looksLikeStructuredSearch(query: string) {
+  return /\b(home|homes|house|houses|condo|townhouse|property|properties|listing|listings|rent|sale|open house|construction)\b/i.test(query);
+}
 
 function hasActiveFilters(filters: ReturnType<typeof usePropertyStore.getState>["filters"]) {
   return Boolean(
@@ -37,6 +41,7 @@ export function MapSearchView({ listOnly = false }: MapSearchViewProps) {
   const {
     properties,
     propertyMap,
+    activePropertyIds,
     selectedPropertyId,
     selectProperty,
     filters,
@@ -54,16 +59,27 @@ export function MapSearchView({ listOnly = false }: MapSearchViewProps) {
   const [showFilters, setShowFilters] = useState(false);
   const [prompt, setPrompt] = useState(searchQuery);
 
+  const activeProperties = useMemo(
+    () => resolvePropertiesById(activePropertyIds, propertyMap, properties),
+    [activePropertyIds, propertyMap, properties]
+  );
   const selectedProperty = selectedPropertyId ? propertyMap[selectedPropertyId] ?? null : null;
   const activeFilters = hasActiveFilters(filters);
-  const mapProperties = useMemo(() => properties.slice(0, MAX_MAP_MARKERS), [properties]);
+  const mapProperties = useMemo(
+    () => activeProperties.slice(0, MAX_MAP_MARKERS),
+    [activeProperties]
+  );
+  const visibleProperties = useMemo(
+    () => (listOnly ? activeProperties : mapProperties),
+    [activeProperties, listOnly, mapProperties]
+  );
 
   useEffect(() => {
     setPrompt(searchQuery);
   }, [searchQuery]);
 
   useEffect(() => {
-    if (!searchQuery && properties.length === 0) return;
+    if (!searchQuery && activeProperties.length === 0) return;
 
     const controller = new AbortController();
     setSearching(true);
@@ -93,11 +109,14 @@ export function MapSearchView({ listOnly = false }: MapSearchViewProps) {
     return () => {
       controller.abort();
     };
-  }, [filters, properties.length, searchQuery, searchSummary, setSearchError, setSearchResults, setSearching]);
+  }, [activeProperties.length, filters, searchQuery, searchSummary, setSearchError, setSearchResults, setSearching]);
 
   async function runPromptSearch() {
-    const query = prompt.trim();
-    if (!query || isSearching) return;
+    const rawQuery = prompt.trim();
+    if (!rawQuery || isSearching) return;
+    const query = looksLikeStructuredSearch(rawQuery)
+      ? rawQuery
+      : `homes for sale in ${rawQuery}`;
 
     setSearching(true);
     setSearchError(null);
@@ -118,6 +137,7 @@ export function MapSearchView({ listOnly = false }: MapSearchViewProps) {
         filters: intent.filters,
         summary: intent.summary,
       });
+      selectProperty(response.properties[0]?.id ?? null);
     } catch {
       setSearchError("Could not run that search right now.");
     } finally {
@@ -142,9 +162,9 @@ export function MapSearchView({ listOnly = false }: MapSearchViewProps) {
         <div className="space-y-3 border-b border-border p-3">
           <div className="flex items-start gap-2">
             <div className="flex-1 space-y-1">
-              <span className="text-sm font-medium">{properties.length} properties</span>
+              <span className="text-sm font-medium">{visibleProperties.length} properties</span>
               <div className="text-xs text-muted-foreground line-clamp-2">
-                {searchSummary || "Showing a small California starter set. Search a city, zip code, or home type to load more."}
+                {searchSummary || "Showing active homes. Search by city, zip code, neighborhood, or home type to narrow the results."}
               </div>
             </div>
             <Button
@@ -183,7 +203,7 @@ export function MapSearchView({ listOnly = false }: MapSearchViewProps) {
                   runPromptSearch();
                 }
               }}
-              placeholder="Search California by city, zip code, neighborhood, or home type..."
+              placeholder="Search by city, zip code, neighborhood, or home type..."
               className="h-9"
             />
             <Button onClick={runPromptSearch} disabled={isSearching || !prompt.trim()} className="gap-2">
@@ -206,9 +226,9 @@ export function MapSearchView({ listOnly = false }: MapSearchViewProps) {
           </div>
         )}
 
-        <ScrollArea className="flex-1">
+        <ScrollArea className="min-h-0 flex-1">
           <div className="p-3 space-y-3">
-            {properties.length === 0 && (
+            {visibleProperties.length === 0 && (
               <div className="py-12 text-center text-muted-foreground space-y-2">
                 {isSearching ? (
                   <Loader2 className="w-5 h-5 animate-spin mx-auto" />
@@ -224,7 +244,7 @@ export function MapSearchView({ listOnly = false }: MapSearchViewProps) {
                 )}
               </div>
             )}
-            {properties.map((property) => (
+            {visibleProperties.map((property) => (
               <PropertyCard
                 key={property.id}
                 property={property}
@@ -243,7 +263,7 @@ export function MapSearchView({ listOnly = false }: MapSearchViewProps) {
             selectedId={selectedPropertyId}
             onSelectProperty={selectProperty}
           />
-          {properties.length > mapProperties.length && (
+          {activeProperties.length > mapProperties.length && (
             <div className="absolute bottom-3 left-3 z-10 rounded-lg border border-border bg-card/80 px-3 py-1.5 text-xs text-muted-foreground backdrop-blur-sm">
               Map showing top {mapProperties.length} listings for performance
             </div>
